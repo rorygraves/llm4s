@@ -1,8 +1,21 @@
 # LLM4S Production Readiness Roadmap
 
-**Version:** 1.0
+**Status:** 🚧 **DRAFT** 🚧
+**Version:** 1.0-DRAFT
 **Last Updated:** 2025-11-15
 **Target:** Production-Ready 1.0.0 Release
+
+---
+
+## ⚠️ TODO - Before Finalization
+
+This roadmap is currently in **DRAFT** status. Before implementation begins, the following steps must be completed:
+
+- [ ] **1. Discuss and agree roadmap** - Review with core maintainers and community stakeholders
+- [ ] **2. Align issues with roadmap** - Create/update GitHub issues to match roadmap phases
+- [ ] **3. Create project board** - Set up GitHub project board for tracking roadmap progress
+
+Once these steps are complete and the roadmap is agreed upon, this DRAFT marker will be removed and implementation can begin.
 
 ---
 
