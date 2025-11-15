@@ -236,18 +236,31 @@ sbt fullCrossTest
 
 ## Roadmap
 
-Our goal is to implement Scala equivalents of popular Python LLM frameworks, with **multi-provider, multimodal, and observability-first design** as core principles:
+Our goal is to implement Scala equivalents of popular Python LLM frameworks, with **multi-provider, multimodal, and observability-first design** as core principles.
 
-- [ ] Single API access to multiple LLM providers (like LiteLLM) — **llmconnect**
+### 📋 Production Roadmap
+
+**For detailed production readiness planning, see the [Production Readiness Roadmap](docs/roadmap/PRODUCTION_ROADMAP.md)**
+
+The comprehensive roadmap covers:
+- **Seven Production Pillars**: Testing, API Stability, Performance, Security, Documentation, Observability, Community
+- **6-9 Month Timeline**: Structured path to 1.0.0 production release
+- **Feature Completion Tracking**: RAG, Agents, MCP, and more
+- **Success Metrics**: Clear targets for quality, coverage, and adoption
+
+### High-Level Goals
+
+- [ ] Single API access to multiple LLM providers (like LiteLLM) — **llmconnect** ✅ *Complete*
 - [ ] Comprehensive toolchain for building LLM apps (LangChain/LangGraph equivalent)
-  - [ ] RAG search & retrieval
-  - [ ] Tool calling
-  - [ ] Logging, tracking, and monitoring
+  - [x] Tool calling ✅ *Complete*
+  - [ ] RAG search & retrieval 🚧 *In Progress (70%)*
+  - [x] Logging, tracking, and monitoring ✅ *Complete*
 - [ ] Agentic framework (like PydanticAI, CrewAI)
-  - [ ] Single-agent and multi-agent orchestration
-- [ ] Tokenization utilities (Scala port of tiktoken)
-- [ ] Examples for all supported modalities and workflows
-- [ ] Stable platform with extensive test coverage
+  - [x] Single-agent workflows ✅ *Complete*
+  - [ ] Multi-agent orchestration 🚧 *In Progress (60%)*
+- [ ] Tokenization utilities (Scala port of tiktoken) ✅ *Complete*
+- [ ] Examples for all supported modalities and workflows ✅ *Complete*
+- [ ] Stable platform with extensive test coverage 🚧 *In Progress*
 - [ ] Scala Coding SWE Agent — perform SWE Bench–type tasks on Scala codebases
   - [ ] Code maps, code generation, and library templates
 
