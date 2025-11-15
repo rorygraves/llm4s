@@ -330,3 +330,10 @@ curl https://api.anthropic.com/v1/messages \
     toolCalls
   }
 }
+
+object AnthropicClient {
+  import org.llm4s.types.TryOps
+
+  def apply(config: AnthropicConfig): Result[AnthropicClient] =
+    Try(new AnthropicClient(config)).toResult
+}

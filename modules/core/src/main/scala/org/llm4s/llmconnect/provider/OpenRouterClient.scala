@@ -251,3 +251,10 @@ class OpenRouterClient(config: OpenAIConfig) extends LLMClient {
 
   override def getReserveCompletion(): Int = config.reserveCompletion
 }
+
+object OpenRouterClient {
+  import org.llm4s.types.TryOps
+
+  def apply(config: OpenAIConfig): Result[OpenRouterClient] =
+    Try(new OpenRouterClient(config)).toResult
+}

@@ -167,3 +167,10 @@ class OllamaClient(config: OllamaConfig) extends LLMClient {
 
   override def getReserveCompletion(): Int = config.reserveCompletion
 }
+
+object OllamaClient {
+  import org.llm4s.types.TryOps
+
+  def apply(config: OllamaConfig): Result[OllamaClient] =
+    Try(new OllamaClient(config)).toResult
+}
