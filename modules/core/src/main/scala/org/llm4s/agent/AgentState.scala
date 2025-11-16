@@ -5,12 +5,20 @@ import org.llm4s.toolapi.ToolRegistry
 import upickle.default.{ ReadWriter => RW, readwriter }
 
 /**
- * Represents the current state of an agent run
+ * Represents the current state of an agent run.
+ *
+ * @param conversation The conversation history (without system message - that's in systemMessage field)
+ * @param tools The available tool registry
+ * @param initialQuery The initial user query that started this conversation (optional for multi-turn)
+ * @param status Current agent status (InProgress, WaitingForTools, Complete, or Failed)
+ * @param logs Execution logs for this turn
+ * @param systemMessage The system message (injected at API call time, not stored in conversation)
+ * @param completionOptions LLM completion options (temperature, maxTokens, etc.)
  */
 case class AgentState(
   conversation: Conversation,
   tools: ToolRegistry,
-  userQuery: String,
+  initialQuery: Option[String] = None,
   status: AgentStatus = AgentStatus.InProgress,
   logs: Seq[String] = Seq.empty,
   systemMessage: Option[SystemMessage] = None,
@@ -58,7 +66,7 @@ case class AgentState(
     println(s"AGENT STATE DUMP - Status: $status")
     println(separator)
 
-    println(s"User Query: $userQuery")
+    initialQuery.foreach(q => println(s"Initial Query: $q"))
     println(s"Available Tools: ${tools.tools.map(_.name).mkString(", ")}")
     println(separator)
 
@@ -111,8 +119,246 @@ case class AgentState(
 }
 
 object AgentState {
+  import org.llm4s.types.{ Result, TryOps }
+  import upickle.default._
+  import scala.util.Try
+
   // We can't automatically serialize AgentState because it contains ToolRegistry (with function references)
-  // Serialization is handled manually in SessionManager
+  // Serialization is handled manually below
+
+  /**
+   * Prune conversation history based on configuration.
+   * Returns a new AgentState with pruned conversation.
+   *
+   * This is a pure function - it does not modify the input state.
+   *
+   * @param state The current agent state
+   * @param config Context window configuration
+   * @param tokenCounter Function to count tokens in messages (optional, uses simple heuristic by default)
+   * @return New state with pruned conversation
+   */
+  def pruneConversation(
+    state: AgentState,
+    config: ContextWindowConfig,
+    tokenCounter: Message => Int = defaultTokenCounter
+  ): AgentState = {
+    val messages = state.conversation.messages
+
+    // Check if pruning is needed
+    val needsPruning = (config.maxTokens, config.maxMessages) match {
+      case (Some(maxTokens), _) =>
+        messages.map(tokenCounter).sum > maxTokens
+      case (None, Some(maxMessages)) =>
+        messages.length > maxMessages
+      case (None, None) =>
+        false
+    }
+
+    if (!needsPruning) {
+      state
+    } else {
+      val prunedMessages = config.pruningStrategy match {
+        case PruningStrategy.OldestFirst =>
+          pruneOldestFirst(messages, config, tokenCounter)
+        case PruningStrategy.MiddleOut =>
+          pruneMiddleOut(messages, config, tokenCounter)
+        case PruningStrategy.RecentTurnsOnly(turns) =>
+          pruneRecentTurnsOnly(messages, turns, config)
+        case PruningStrategy.Custom(fn) =>
+          fn(messages)
+      }
+
+      state.copy(conversation = Conversation(prunedMessages))
+    }
+  }
+
+  /**
+   * Default token counter (rough estimate: words * 1.3).
+   * For more accurate counting, integrate with the org.llm4s.context.tokens module.
+   */
+  private def defaultTokenCounter(message: Message): Int = {
+    val words = message.content.split("\\s+").length
+    (words * 1.3).toInt
+  }
+
+  private def pruneOldestFirst(
+    messages: Seq[Message],
+    config: ContextWindowConfig,
+    tokenCounter: Message => Int
+  ): Seq[Message] = {
+    // Separate system message if needed
+    val (systemMsgs, otherMsgs) = messages.partition(_.role == MessageRole.System)
+
+    // Calculate how many messages to keep
+    val targetCount = config.maxMessages match {
+      case Some(max) => math.max(1, max - systemMsgs.length)
+      case None =>
+        // Token-based: iteratively count from the end
+        val maxTokens = config.maxTokens.getOrElse(Int.MaxValue)
+        val systemTokens = systemMsgs.map(tokenCounter).sum
+        var count = 0
+        var tokens = 0
+        otherMsgs.reverse.takeWhile { msg =>
+          val msgTokens = tokenCounter(msg)
+          if (tokens + msgTokens + systemTokens <= maxTokens) {
+            tokens += msgTokens
+            count += 1
+            true
+          } else {
+            false
+          }
+        }
+        math.max(1, count)
+    }
+
+    // Keep system messages + recent messages up to limit
+    val toKeep = if (config.preserveSystemMessage) {
+      systemMsgs ++ otherMsgs.takeRight(targetCount)
+    } else {
+      messages.takeRight(targetCount)
+    }
+
+    toKeep
+  }
+
+  private def pruneMiddleOut(
+    messages: Seq[Message],
+    config: ContextWindowConfig,
+    tokenCounter: Message => Int
+  ): Seq[Message] = {
+    val targetCount = config.maxMessages.getOrElse(messages.length / 2)
+    val keepStart = targetCount / 2
+    val keepEnd = targetCount - keepStart
+
+    val (systemMsgs, otherMsgs) = messages.partition(_.role == MessageRole.System)
+
+    if (config.preserveSystemMessage) {
+      systemMsgs ++ otherMsgs.take(keepStart) ++ otherMsgs.takeRight(keepEnd)
+    } else {
+      messages.take(keepStart) ++ messages.takeRight(keepEnd)
+    }
+  }
+
+  private def pruneRecentTurnsOnly(
+    messages: Seq[Message],
+    turns: Int,
+    config: ContextWindowConfig
+  ): Seq[Message] = {
+    // A turn is a user message + assistant response (+ optional tool messages)
+    // Keep the last N complete turns
+    val (systemMsgs, otherMsgs) = messages.partition(_.role == MessageRole.System)
+
+    // Group messages into turns (simplified: every user message starts a turn)
+    val turnStarts = otherMsgs.zipWithIndex
+      .filter(_._1.role == MessageRole.User)
+      .map(_._2)
+
+    val keepFromIndex = if (turnStarts.length > turns) {
+      turnStarts(turnStarts.length - turns)
+    } else {
+      0
+    }
+
+    if (config.preserveSystemMessage) {
+      systemMsgs ++ otherMsgs.drop(keepFromIndex)
+    } else {
+      otherMsgs.drop(keepFromIndex)
+    }
+  }
+
+  /**
+   * Serialize agent state to JSON.
+   *
+   * Note: ToolRegistry is not serialized (contains function references).
+   * Tools must be re-registered when loading state.
+   *
+   * @param state The agent state to serialize
+   * @return JSON representation
+   */
+  def toJson(state: AgentState): ujson.Value = {
+    ujson.Obj(
+      "conversation" -> writeJs(state.conversation),
+      "initialQuery" -> state.initialQuery.map(ujson.Str).getOrElse(ujson.Null),
+      "status" -> writeJs(state.status),
+      "logs" -> ujson.Arr(state.logs.map(ujson.Str): _*),
+      "systemMessage" -> state.systemMessage.map(msg => ujson.Str(msg.content)).getOrElse(ujson.Null),
+      "completionOptions" -> writeJs(state.completionOptions)
+      // Note: tools are NOT serialized
+    )
+  }
+
+  /**
+   * Deserialize agent state from JSON.
+   *
+   * Tools must be provided separately as they cannot be serialized.
+   *
+   * @param json The JSON representation
+   * @param tools The tool registry to use (must be provided by caller)
+   * @return Result containing the deserialized state or an error
+   */
+  def fromJson(
+    json: ujson.Value,
+    tools: ToolRegistry
+  ): Result[AgentState] = {
+    Try {
+      AgentState(
+        conversation = read[Conversation](json("conversation")),
+        tools = tools, // Provided by caller
+        initialQuery = json("initialQuery") match {
+          case ujson.Str(q) => Some(q)
+          case _            => None
+        },
+        status = read[AgentStatus](json("status")),
+        logs = json("logs").arr.map(_.str).toSeq,
+        systemMessage = json("systemMessage") match {
+          case ujson.Str(content) => Some(SystemMessage(content))
+          case _                  => None
+        },
+        completionOptions = read[CompletionOptions](json("completionOptions"))
+      )
+    }.toResult
+  }
+
+  /**
+   * Save state to file (convenience method).
+   *
+   * This performs I/O and may fail with filesystem errors.
+   *
+   * @param state The state to save
+   * @param path File path to write to
+   * @return Result indicating success or error
+   */
+  def saveToFile(state: AgentState, path: String): Result[Unit] = {
+    import java.nio.file.{ Files, Paths }
+    import java.nio.charset.StandardCharsets
+
+    Try {
+      val json = toJson(state)
+      val jsonStr = write(json, indent = 2)
+      Files.write(Paths.get(path), jsonStr.getBytes(StandardCharsets.UTF_8))
+      ()
+    }.toResult
+  }
+
+  /**
+   * Load state from file (convenience method).
+   *
+   * This performs I/O and may fail with filesystem errors or parse errors.
+   *
+   * @param path File path to read from
+   * @param tools The tool registry to use (tools are not serialized)
+   * @return Result containing the loaded state or an error
+   */
+  def loadFromFile(path: String, tools: ToolRegistry): Result[AgentState] = {
+    import java.nio.file.{ Files, Paths }
+    import java.nio.charset.StandardCharsets
+
+    for {
+      jsonStr <- Try(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8)).toResult
+      json <- Try(ujson.read(jsonStr)).toResult
+      state <- fromJson(json, tools)
+    } yield state
+  }
 }
 
 /**

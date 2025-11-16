@@ -685,6 +685,103 @@ def getWeather(location: String, unit: String = "celsius"): Result[String] = {
 // Tool registration happens automatically via ToolFunction.apply
 ```
 
+### Working with Multi-Turn Conversations
+
+**Multi-turn conversation support** was added in Phase 1.1 to provide a functional, immutable API for agent conversations.
+
+#### Basic Multi-Turn Pattern
+
+```scala
+import org.llm4s.agent.Agent
+import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.toolapi.ToolRegistry
+
+val result = for {
+  client <- LLMConnect.fromEnv()
+  tools = new ToolRegistry(Seq(WeatherTool.tool))
+  agent = new Agent(client)
+
+  // Turn 1
+  state1 <- agent.run("What's the weather in Paris?", tools)
+
+  // Turn 2 - continue from state1
+  state2 <- agent.continueConversation(state1, "And in London?")
+
+  // Turn 3 - continue from state2
+  state3 <- agent.continueConversation(state2, "Which is warmer?")
+
+} yield state3
+```
+
+**No `var`, no mutation, pure functional style!**
+
+#### Multi-Turn Helper Method
+
+For convenience, use `runMultiTurn` to chain turns automatically:
+
+```scala
+val result = agent.runMultiTurn(
+  initialQuery = "What's the weather in Paris?",
+  followUpQueries = Seq(
+    "And in London?",
+    "Which is warmer?"
+  ),
+  tools = tools
+)
+```
+
+#### Context Window Management
+
+For long conversations, use `ContextWindowConfig` to automatically prune history:
+
+```scala
+import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }
+
+val contextConfig = ContextWindowConfig(
+  maxMessages = Some(20),         // Keep max 20 messages
+  preserveSystemMessage = true,   // Always keep system message
+  pruningStrategy = PruningStrategy.OldestFirst  // Drop oldest first
+)
+
+val state2 = agent.continueConversation(
+  state1,
+  "Next question?",
+  contextWindowConfig = Some(contextConfig)
+)
+```
+
+**Available Pruning Strategies:**
+- `PruningStrategy.OldestFirst` - Remove oldest messages (FIFO)
+- `PruningStrategy.MiddleOut` - Keep start and end, remove middle
+- `PruningStrategy.RecentTurnsOnly(n)` - Keep only last N turns
+- `PruningStrategy.Custom(fn)` - Custom function
+
+#### Conversation Persistence
+
+Save and load agent state for resumable conversations:
+
+```scala
+import org.llm4s.agent.AgentState
+
+// Save state to file
+AgentState.saveToFile(state, "/tmp/conversation.json")
+
+// Later, in a different session...
+for {
+  tools = new ToolRegistry(Seq(...))  // Must recreate tools
+  loadedState <- AgentState.loadFromFile("/tmp/conversation.json", tools)
+  state2 <- agent.continueConversation(loadedState, "Continue...")
+} yield state2
+```
+
+**Note:** Tools are not serialized (they contain function references) and must be re-registered when loading state.
+
+#### Examples
+
+- **Multi-turn**: `samples/runMain org.llm4s.samples.agent.MultiTurnConversationExample`
+- **Context pruning**: `samples/runMain org.llm4s.samples.agent.LongConversationExample`
+- **Persistence**: `samples/runMain org.llm4s.samples.agent.ConversationPersistenceExample`
+
 ### Adding a New Provider
 
 1. **Create** provider config in `llmconnect/config/`
@@ -869,6 +966,7 @@ ls modules/core/src/main/scala-{2.13,3}/
 | Date | Changes |
 |------|---------|
 | 2025-11-15 | Initial CLAUDE.md creation |
+| 2025-11-16 | Added Phase 1.1 multi-turn conversation management |
 
 ---
 

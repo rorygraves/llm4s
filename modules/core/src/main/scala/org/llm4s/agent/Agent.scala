@@ -53,7 +53,7 @@ class Agent(client: LLMClient) {
     AgentState(
       conversation = Conversation(initialMessages),
       tools = tools,
-      userQuery = query,
+      initialQuery = Some(query),
       systemMessage = Some(systemMsg),
       completionOptions = completionOptions
     )
@@ -290,7 +290,7 @@ class Agent(client: LLMClient) {
 
     // Add header
     sb.append("# Agent Execution Trace\n\n")
-    sb.append(s"**Query:** ${state.userQuery}\n")
+    state.initialQuery.foreach(q => sb.append(s"**Initial Query:** $q\n"))
     sb.append(s"**Status:** ${state.status}\n")
     sb.append(s"**Tools Available:** ${state.tools.tools.map(_.name).mkString(", ")}\n\n")
 
@@ -548,5 +548,130 @@ class Agent(client: LLMClient) {
     }
     val initialState = initialize(query, tools, systemPromptAddition, completionOptions)
     run(initialState, maxSteps, traceLogPath, debug)
+  }
+
+  /**
+   * Continue an agent conversation with a new user message.
+   * This is the functional way to handle multi-turn conversations.
+   *
+   * The previous state must be in Complete or Failed status - cannot continue from InProgress or WaitingForTools.
+   * This ensures a clean turn boundary and prevents inconsistent state.
+   *
+   * @param previousState The previous agent state (must be Complete or Failed)
+   * @param newUserMessage The new user message to process
+   * @param maxSteps Optional limit on reasoning steps for this turn
+   * @param traceLogPath Optional path for trace logging
+   * @param contextWindowConfig Optional configuration for automatic context pruning
+   * @param debug Enable debug logging
+   * @return Result containing the new agent state after processing the message
+   *
+   * @example
+   * {{{
+   * val result = for {
+   *   client <- LLMConnect.fromEnv()
+   *   tools = new ToolRegistry(Seq(WeatherTool.tool))
+   *   agent = new Agent(client)
+   *   state1 <- agent.run("What's the weather in Paris?", tools)
+   *   state2 <- agent.continueConversation(state1, "And in London?")
+   *   state3 <- agent.continueConversation(state2, "Which is warmer?")
+   * } yield state3
+   * }}}
+   */
+  def continueConversation(
+    previousState: AgentState,
+    newUserMessage: String,
+    maxSteps: Option[Int] = None,
+    traceLogPath: Option[String] = None,
+    contextWindowConfig: Option[ContextWindowConfig] = None,
+    debug: Boolean = false
+  ): Result[AgentState] = {
+    import org.llm4s.error.ValidationError
+
+    // Validate previous state
+    previousState.status match {
+      case AgentStatus.Complete | AgentStatus.Failed(_) =>
+        // Prepare new state by adding user message and resetting status
+        val stateWithNewMessage = previousState.copy(
+          conversation = previousState.conversation.addMessage(UserMessage(newUserMessage)),
+          status = AgentStatus.InProgress,
+          logs = Seq.empty // Reset logs for new turn
+        )
+
+        // Optionally prune before running
+        val stateToRun = contextWindowConfig match {
+          case Some(config) =>
+            AgentState.pruneConversation(stateWithNewMessage, config)
+          case None =>
+            stateWithNewMessage
+        }
+
+        // Run from the new state
+        run(stateToRun, maxSteps, traceLogPath, debug)
+
+      case AgentStatus.InProgress | AgentStatus.WaitingForTools =>
+        Left(
+          ValidationError(
+            "Cannot continue from an incomplete conversation. " +
+              "Previous state must be Complete or Failed. " +
+              s"Current status: ${previousState.status}"
+          )
+        )
+    }
+  }
+
+  /**
+   * Run multiple conversation turns sequentially.
+   * Each turn waits for the previous to complete before starting.
+   * This is a convenience method for running a complete multi-turn conversation.
+   *
+   * @param initialQuery The first user message
+   * @param followUpQueries Additional user messages to process in sequence
+   * @param tools Tool registry for the conversation
+   * @param maxStepsPerTurn Optional step limit per turn
+   * @param systemPromptAddition Optional system prompt addition
+   * @param completionOptions Completion options
+   * @param contextWindowConfig Optional configuration for automatic context pruning
+   * @param debug Enable debug logging
+   * @return Result containing the final agent state after all turns
+   *
+   * @example
+   * {{{
+   * val result = agent.runMultiTurn(
+   *   initialQuery = "What's the weather in Paris?",
+   *   followUpQueries = Seq(
+   *     "And in London?",
+   *     "Which is warmer?"
+   *   ),
+   *   tools = tools
+   * )
+   * }}}
+   */
+  def runMultiTurn(
+    initialQuery: String,
+    followUpQueries: Seq[String],
+    tools: ToolRegistry,
+    maxStepsPerTurn: Option[Int] = None,
+    systemPromptAddition: Option[String] = None,
+    completionOptions: CompletionOptions = CompletionOptions(),
+    contextWindowConfig: Option[ContextWindowConfig] = None,
+    debug: Boolean = false
+  ): Result[AgentState] = {
+    // Run first turn
+    val firstTurn = run(
+      initialQuery,
+      tools,
+      maxStepsPerTurn,
+      None,
+      systemPromptAddition,
+      completionOptions,
+      debug
+    )
+
+    // Fold over follow-up queries, threading state through
+    followUpQueries.foldLeft(firstTurn) { (stateResult, query) =>
+      stateResult.flatMap { state =>
+        continueConversation(state, query, maxStepsPerTurn, None, contextWindowConfig, debug)
+      }
+    }
   }
 }
