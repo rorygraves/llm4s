@@ -12,6 +12,7 @@ import org.llm4s.types.Result
  * @tparam A The type of value to validate
  */
 trait Guardrail[A] {
+
   /**
    * Validate a value.
    *
@@ -54,6 +55,7 @@ trait Guardrail[A] {
  * - Tool arguments
  */
 trait InputGuardrail extends Guardrail[String] {
+
   /**
    * Optional: Transform the input after validation.
    * Default is identity (no transformation).
@@ -73,6 +75,7 @@ trait InputGuardrail extends Guardrail[String] {
  * - Final responses
  */
 trait OutputGuardrail extends Guardrail[String] {
+
   /**
    * Optional: Transform the output after validation.
    * Default is identity (no transformation).

@@ -1,6 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
-import org.llm4s.agent.guardrails.{InputGuardrail, OutputGuardrail}
+import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
@@ -19,16 +19,19 @@ import scala.util.matching.Regex
 class RegexValidator(
   pattern: Regex,
   errorMessage: Option[String] = None
-) extends InputGuardrail with OutputGuardrail {
+) extends InputGuardrail
+    with OutputGuardrail {
 
   def validate(value: String): Result[String] =
     if (pattern.findFirstIn(value).isDefined) {
       Right(value)
     } else {
-      Left(ValidationError.invalid(
-        "value",
-        errorMessage.getOrElse(s"Value does not match pattern: $pattern")
-      ))
+      Left(
+        ValidationError.invalid(
+          "value",
+          errorMessage.getOrElse(s"Value does not match pattern: $pattern")
+        )
+      )
     }
 
   val name: String = "RegexValidator"
@@ -42,6 +45,7 @@ class RegexValidator(
 }
 
 object RegexValidator {
+
   /**
    * Create a regex validator from a pattern string.
    */

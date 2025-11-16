@@ -4,7 +4,7 @@ import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
-import scala.util.{Failure, Success, Try}
+import scala.util.{ Failure, Success, Try }
 
 /**
  * Validates that output is valid JSON matching an optional schema.
@@ -16,7 +16,7 @@ import scala.util.{Failure, Success, Try}
  */
 class JSONValidator(schema: Option[ujson.Value] = None) extends OutputGuardrail {
 
-  def validate(value: String): Result[String] = {
+  def validate(value: String): Result[String] =
     // Try to parse as JSON
     Try(ujson.read(value)) match {
       case Success(_) =>
@@ -31,24 +31,26 @@ class JSONValidator(schema: Option[ujson.Value] = None) extends OutputGuardrail 
         }
 
       case Failure(ex) =>
-        Left(ValidationError.invalid(
-          "output",
-          s"Output is not valid JSON: ${ex.getMessage}"
-        ))
+        Left(
+          ValidationError.invalid(
+            "output",
+            s"Output is not valid JSON: ${ex.getMessage}"
+          )
+        )
     }
-  }
 
   val name: String = "JSONValidator"
 
   override val description: Option[String] = Some(
     schema match {
       case Some(_) => "Validates output is valid JSON matching schema"
-      case None => "Validates output is valid JSON"
+      case None    => "Validates output is valid JSON"
     }
   )
 }
 
 object JSONValidator {
+
   /**
    * Create a JSON validator without schema validation.
    */

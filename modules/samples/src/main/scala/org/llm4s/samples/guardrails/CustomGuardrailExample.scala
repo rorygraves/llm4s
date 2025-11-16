@@ -15,20 +15,22 @@ import org.llm4s.types.Result
  */
 class KeywordRequirementGuardrail(requiredKeywords: Set[String]) extends InputGuardrail {
   def validate(value: String): Result[String] = {
-    val lowerValue = value.toLowerCase
+    val lowerValue      = value.toLowerCase
     val missingKeywords = requiredKeywords.filterNot(kw => lowerValue.contains(kw.toLowerCase))
 
     if (missingKeywords.isEmpty) {
       Right(value)
     } else {
-      Left(ValidationError.invalid(
-        "input",
-        s"Query must contain keywords: ${missingKeywords.mkString(", ")}"
-      ))
+      Left(
+        ValidationError.invalid(
+          "input",
+          s"Query must contain keywords: ${missingKeywords.mkString(", ")}"
+        )
+      )
     }
   }
 
-  val name = "KeywordRequirementGuardrail"
+  val name                 = "KeywordRequirementGuardrail"
   override val description = Some(s"Requires keywords: ${requiredKeywords.mkString(", ")}")
 }
 
@@ -62,9 +64,7 @@ object CustomGuardrailExample extends App {
     case Right(state) =>
       println("✓ Query contained required keywords (scala, programming)")
       println(s"\nAgent response:")
-      state.conversation.messages.last.content.split("\n").take(5).foreach(line =>
-        println(s"  $line")
-      )
+      state.conversation.messages.last.content.split("\n").take(5).foreach(line => println(s"  $line"))
 
     case Left(error) =>
       println(s"✗ Validation failed:")
@@ -78,7 +78,7 @@ object CustomGuardrailExample extends App {
 
   val failureResult = for {
     client <- LLMConnect.fromEnv()
-    agent = new Agent(client)
+    agent           = new Agent(client)
     customGuardrail = new KeywordRequirementGuardrail(Set("scala", "programming"))
 
     // This should fail - doesn't contain required keywords

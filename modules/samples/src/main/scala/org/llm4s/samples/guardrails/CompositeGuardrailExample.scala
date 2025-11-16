@@ -20,10 +20,12 @@ object CompositeGuardrailExample extends App {
   // Example 1: All guardrails must pass (AND logic)
   println("Example 1: All guardrails must pass\n")
 
-  val safetyChecks = CompositeGuardrail.all(Seq(
-    new LengthCheck(min = 1, max = 10000),
-    new ProfanityFilter()
-  ))
+  val safetyChecks = CompositeGuardrail.all(
+    Seq(
+      new LengthCheck(min = 1, max = 10000),
+      new ProfanityFilter()
+    )
+  )
 
   val result1 = for {
     client <- LLMConnect.fromEnv()
@@ -49,11 +51,13 @@ object CompositeGuardrailExample extends App {
   // Example 2: At least one guardrail must pass (OR logic)
   println("Example 2: At least one guardrail must pass (language detection)\n")
 
-  val languageDetection = CompositeGuardrail.any(Seq(
-    new RegexValidator(".*\\b(scala|functional)\\b.*".r),
-    new RegexValidator(".*\\b(java|object-oriented)\\b.*".r),
-    new RegexValidator(".*\\b(python|dynamic)\\b.*".r)
-  ))
+  val languageDetection = CompositeGuardrail.any(
+    Seq(
+      new RegexValidator(".*\\b(scala|functional)\\b.*".r),
+      new RegexValidator(".*\\b(java|object-oriented)\\b.*".r),
+      new RegexValidator(".*\\b(python|dynamic)\\b.*".r)
+    )
+  )
 
   val result2 = for {
     client <- LLMConnect.fromEnv()
@@ -78,10 +82,12 @@ object CompositeGuardrailExample extends App {
   // Example 3: Sequential validation (short-circuit on failure)
   println("Example 3: Sequential validation with early termination\n")
 
-  val sequentialChecks = CompositeGuardrail.sequential(Seq(
-    new LengthCheck(min = 1, max = 10000),  // Check this first (cheap)
-    new ProfanityFilter()                    // Only check if length passes
-  ))
+  val sequentialChecks = CompositeGuardrail.sequential(
+    Seq(
+      new LengthCheck(min = 1, max = 10000), // Check this first (cheap)
+      new ProfanityFilter()                  // Only check if length passes
+    )
+  )
 
   val result3 = for {
     client <- LLMConnect.fromEnv()
@@ -108,23 +114,26 @@ object CompositeGuardrailExample extends App {
   println("Example 4: Combining safety and business logic\n")
 
   val combinedValidation: InputGuardrail = new InputGuardrail {
-    val safetyLayer = CompositeGuardrail.all(Seq(
-      new LengthCheck(1, 10000),
-      new ProfanityFilter()
-    ))
+    val safetyLayer = CompositeGuardrail.all(
+      Seq(
+        new LengthCheck(1, 10000),
+        new ProfanityFilter()
+      )
+    )
 
-    val businessLayer = CompositeGuardrail.any(Seq(
-      new RegexValidator(".*\\b(scala|java|python|rust)\\b.*".r)
-    ))
+    val businessLayer = CompositeGuardrail.any(
+      Seq(
+        new RegexValidator(".*\\b(scala|java|python|rust)\\b.*".r)
+      )
+    )
 
-    def validate(value: String): org.llm4s.types.Result[String] = {
+    def validate(value: String): org.llm4s.types.Result[String] =
       for {
-        safeInput <- safetyLayer.validate(value)
+        safeInput  <- safetyLayer.validate(value)
         validInput <- businessLayer.validate(safeInput)
       } yield validInput
-    }
 
-    val name = "CombinedValidation"
+    val name                 = "CombinedValidation"
     override val description = Some("Safety checks + business logic")
   }
 
@@ -145,9 +154,7 @@ object CompositeGuardrailExample extends App {
       println(s"  Safety layer: PASS")
       println(s"  Business layer: PASS")
       println("\nResponse preview:")
-      state.conversation.messages.last.content.split("\n").take(3).foreach(line =>
-        println(s"  $line")
-      )
+      state.conversation.messages.last.content.split("\n").take(3).foreach(line => println(s"  $line"))
 
     case Left(error) =>
       println(s"✗ Combined validation failed: ${error.formatted}")

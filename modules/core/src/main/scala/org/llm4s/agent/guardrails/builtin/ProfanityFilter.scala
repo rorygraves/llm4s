@@ -1,6 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
-import org.llm4s.agent.guardrails.{InputGuardrail, OutputGuardrail}
+import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
@@ -21,13 +21,15 @@ import org.llm4s.types.Result
 class ProfanityFilter(
   customBadWords: Set[String] = Set.empty,
   caseSensitive: Boolean = false
-) extends InputGuardrail with OutputGuardrail {
+) extends InputGuardrail
+    with OutputGuardrail {
 
   // Default bad words list (basic example - expand for production)
   private val defaultBadWords: Set[String] = Set(
     // This is intentionally minimal for example purposes
     // In production, use a comprehensive profanity list or external API
-    "badword", "inappropriate"
+    "badword",
+    "inappropriate"
   )
 
   private val badWords: Set[String] = {
@@ -37,16 +39,18 @@ class ProfanityFilter(
 
   def validate(value: String): Result[String] = {
     val checkValue = if (caseSensitive) value else value.toLowerCase
-    val words = checkValue.split("\\s+")
+    val words      = checkValue.split("\\s+")
 
     val foundBadWords = words.filter(badWords.contains)
 
     if (foundBadWords.nonEmpty) {
-      Left(ValidationError.invalid(
-        "input",
-        "Input contains inappropriate content"
-        // Don't reveal the specific words for security/privacy
-      ))
+      Left(
+        ValidationError.invalid(
+          "input",
+          "Input contains inappropriate content"
+          // Don't reveal the specific words for security/privacy
+        )
+      )
     } else {
       Right(value)
     }
@@ -63,6 +67,7 @@ class ProfanityFilter(
 }
 
 object ProfanityFilter {
+
   /**
    * Create a profanity filter with default settings.
    */

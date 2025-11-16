@@ -1,6 +1,6 @@
 package org.llm4s.agent
 
-import org.llm4s.agent.guardrails.{CompositeGuardrail, InputGuardrail, OutputGuardrail}
+import org.llm4s.agent.guardrails.{ CompositeGuardrail, InputGuardrail, OutputGuardrail }
 import org.llm4s.core.safety.Safety
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -424,7 +424,7 @@ class Agent(client: LLMClient) {
   private def validateInput(
     query: String,
     guardrails: Seq[InputGuardrail]
-  ): Result[String] = {
+  ): Result[String] =
     if (guardrails.isEmpty) {
       Right(query)
     } else {
@@ -432,7 +432,6 @@ class Agent(client: LLMClient) {
       val composite = CompositeGuardrail.all(guardrails)
       composite.validate(query)
     }
-  }
 
   /**
    * Validate output using guardrails.
@@ -447,7 +446,7 @@ class Agent(client: LLMClient) {
   private def validateOutput(
     state: AgentState,
     guardrails: Seq[OutputGuardrail]
-  ): Result[AgentState] = {
+  ): Result[AgentState] =
     if (guardrails.isEmpty) {
       Right(state)
     } else {
@@ -461,7 +460,6 @@ class Agent(client: LLMClient) {
       val composite = CompositeGuardrail.all(guardrails)
       composite.validate(finalMessage).map(_ => state)
     }
-  }
 
   /**
    * Runs the agent from an existing state until completion, failure, or step limit is reached
@@ -595,7 +593,7 @@ class Agent(client: LLMClient) {
     systemPromptAddition: Option[String] = None,
     completionOptions: CompletionOptions = CompletionOptions(),
     debug: Boolean = false
-  ): Result[AgentState] = {
+  ): Result[AgentState] =
     for {
       // 1. Validate input
       validatedQuery <- validateInput(query, inputGuardrails)
@@ -616,7 +614,6 @@ class Agent(client: LLMClient) {
       // 3. Validate output
       validatedState <- validateOutput(finalState, outputGuardrails)
     } yield validatedState
-  }
 
   /**
    * Continue an agent conversation with a new user message.

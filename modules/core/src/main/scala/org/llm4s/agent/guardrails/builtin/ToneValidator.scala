@@ -13,11 +13,11 @@ sealed trait Tone {
 
 object Tone {
   case object Professional extends Tone { val name = "Professional" }
-  case object Casual extends Tone { val name = "Casual" }
-  case object Friendly extends Tone { val name = "Friendly" }
-  case object Formal extends Tone { val name = "Formal" }
-  case object Excited extends Tone { val name = "Excited" }
-  case object Neutral extends Tone { val name = "Neutral" }
+  case object Casual       extends Tone { val name = "Casual"       }
+  case object Friendly     extends Tone { val name = "Friendly"     }
+  case object Formal       extends Tone { val name = "Formal"       }
+  case object Excited      extends Tone { val name = "Excited"      }
+  case object Neutral      extends Tone { val name = "Neutral"      }
 
   val all: Set[Tone] = Set(Professional, Casual, Friendly, Formal, Excited, Neutral)
 }
@@ -38,10 +38,12 @@ class ToneValidator(allowedTones: Set[Tone]) extends OutputGuardrail {
     if (allowedTones.contains(detectedTone)) {
       Right(value)
     } else {
-      Left(ValidationError.invalid(
-        "output",
-        s"Output tone (${detectedTone.name}) not allowed. Allowed tones: ${allowedTones.map(_.name).mkString(", ")}"
-      ))
+      Left(
+        ValidationError.invalid(
+          "output",
+          s"Output tone (${detectedTone.name}) not allowed. Allowed tones: ${allowedTones.map(_.name).mkString(", ")}"
+        )
+      )
     }
   }
 
@@ -90,6 +92,7 @@ class ToneValidator(allowedTones: Set[Tone]) extends OutputGuardrail {
 }
 
 object ToneValidator {
+
   /**
    * Create a tone validator with specified allowed tones.
    */

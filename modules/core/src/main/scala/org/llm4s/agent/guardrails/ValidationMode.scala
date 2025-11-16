@@ -9,6 +9,7 @@ package org.llm4s.agent.guardrails
 sealed trait ValidationMode
 
 object ValidationMode {
+
   /**
    * All guardrails must pass (default).
    *

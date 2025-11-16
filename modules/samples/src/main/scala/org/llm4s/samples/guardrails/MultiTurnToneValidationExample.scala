@@ -72,9 +72,7 @@ object MultiTurnToneValidationExample extends App {
       println(s"  Turns completed: 3")
 
       println("\nFinal response:")
-      finalState.conversation.messages.last.content.split("\n").take(5).foreach(line =>
-        println(s"  $line")
-      )
+      finalState.conversation.messages.last.content.split("\n").take(5).foreach(line => println(s"  $line"))
 
     case Left(error) =>
       println(s"✗ Validation or execution failed:")

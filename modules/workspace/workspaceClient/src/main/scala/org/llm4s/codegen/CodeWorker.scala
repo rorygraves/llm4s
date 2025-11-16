@@ -55,7 +55,7 @@ class CodeWorker(sourceDirectory: String, imageName: String, hostPort: Int, clie
     }
 
     // Run the agent to completion or until step limit is reached
-    val agent  = new Agent(client)
+    val agent = new Agent(client)
     val result = agent.run(
       query = task,
       tools = toolRegistry,

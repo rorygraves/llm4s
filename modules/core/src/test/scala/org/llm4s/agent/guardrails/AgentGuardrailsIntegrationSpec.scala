@@ -19,17 +19,18 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
     override def complete(
       conversation: Conversation,
       options: CompletionOptions
-    ): Result[Completion] = {
-      Right(Completion(
-        id = "test-completion",
-        created = System.currentTimeMillis(),
-        content = response,
-        model = "mock-model",
-        message = AssistantMessage(response, toolCalls = List.empty),
-        toolCalls = List.empty,
-        usage = None
-      ))
-    }
+    ): Result[Completion] =
+      Right(
+        Completion(
+          id = "test-completion",
+          created = System.currentTimeMillis(),
+          content = response,
+          model = "mock-model",
+          message = AssistantMessage(response, toolCalls = List.empty),
+          toolCalls = List.empty,
+          usage = None
+        )
+      )
 
     override def streamComplete(
       conversation: Conversation,
@@ -37,12 +38,14 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       // Call the callback with a chunk
-      onChunk(StreamedChunk(
-        id = "test-completion",
-        content = Some(response),
-        toolCall = None,
-        finishReason = Some("stop")
-      ))
+      onChunk(
+        StreamedChunk(
+          id = "test-completion",
+          content = Some(response),
+          toolCall = None,
+          finishReason = Some("stop")
+        )
+      )
 
       // Return the full completion
       complete(conversation, options)
@@ -55,8 +58,8 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
 
   "Agent.run with input guardrails" should "validate input before processing" in {
     val mockClient = new MockLLMClient("Response")
-    val agent = new Agent(mockClient)
-    val tools = new ToolRegistry(Seq.empty)
+    val agent      = new Agent(mockClient)
+    val tools      = new ToolRegistry(Seq.empty)
 
     val inputGuardrails = Seq(
       new LengthCheck(min = 10, max = 100)
@@ -76,8 +79,8 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "pass when input validation succeeds" in {
     val mockClient = new MockLLMClient("Valid response")
-    val agent = new Agent(mockClient)
-    val tools = new ToolRegistry(Seq.empty)
+    val agent      = new Agent(mockClient)
+    val tools      = new ToolRegistry(Seq.empty)
 
     val inputGuardrails = Seq(
       new LengthCheck(min = 1, max = 100)
@@ -94,8 +97,8 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "apply multiple input guardrails" in {
     val mockClient = new MockLLMClient("Response")
-    val agent = new Agent(mockClient)
-    val tools = new ToolRegistry(Seq.empty)
+    val agent      = new Agent(mockClient)
+    val tools      = new ToolRegistry(Seq.empty)
 
     val inputGuardrails = Seq(
       new LengthCheck(min = 1, max = 100),
@@ -114,8 +117,8 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
 
   "Agent.run with output guardrails" should "validate output before returning" in {
     val mockClient = new MockLLMClient("not json")
-    val agent = new Agent(mockClient)
-    val tools = new ToolRegistry(Seq.empty)
+    val agent      = new Agent(mockClient)
+    val tools      = new ToolRegistry(Seq.empty)
 
     val outputGuardrails = Seq(
       new JSONValidator()
@@ -134,8 +137,8 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "pass when output validation succeeds" in {
     val mockClient = new MockLLMClient("""{"key": "value"}""")
-    val agent = new Agent(mockClient)
-    val tools = new ToolRegistry(Seq.empty)
+    val agent      = new Agent(mockClient)
+    val tools      = new ToolRegistry(Seq.empty)
 
     val outputGuardrails = Seq(
       new JSONValidator()
@@ -152,8 +155,8 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "apply multiple output guardrails" in {
     val mockClient = new MockLLMClient("""{"key": "value"}""")
-    val agent = new Agent(mockClient)
-    val tools = new ToolRegistry(Seq.empty)
+    val agent      = new Agent(mockClient)
+    val tools      = new ToolRegistry(Seq.empty)
 
     val outputGuardrails = Seq(
       new JSONValidator(),
@@ -171,8 +174,8 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
 
   "Agent.run with both input and output guardrails" should "validate both" in {
     val mockClient = new MockLLMClient("""{"result": "success"}""")
-    val agent = new Agent(mockClient)
-    val tools = new ToolRegistry(Seq.empty)
+    val agent      = new Agent(mockClient)
+    val tools      = new ToolRegistry(Seq.empty)
 
     val inputGuardrails = Seq(
       new LengthCheck(1, 100),
@@ -195,8 +198,8 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "fail on input validation first" in {
     val mockClient = new MockLLMClient("""{"result": "success"}""")
-    val agent = new Agent(mockClient)
-    val tools = new ToolRegistry(Seq.empty)
+    val agent      = new Agent(mockClient)
+    val tools      = new ToolRegistry(Seq.empty)
 
     val inputGuardrails = Seq(
       new LengthCheck(1, 5) // Will fail
@@ -219,8 +222,8 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
 
   "Agent.continueConversation with guardrails" should "validate new message" in {
     val mockClient = new MockLLMClient("Response")
-    val agent = new Agent(mockClient)
-    val tools = new ToolRegistry(Seq.empty)
+    val agent      = new Agent(mockClient)
+    val tools      = new ToolRegistry(Seq.empty)
 
     // First turn
     val state1 = agent.run("First query", tools).toOption.get
@@ -241,8 +244,8 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "validate output on continuation" in {
     val mockClient = new MockLLMClient("not json")
-    val agent = new Agent(mockClient)
-    val tools = new ToolRegistry(Seq.empty)
+    val agent      = new Agent(mockClient)
+    val tools      = new ToolRegistry(Seq.empty)
 
     // First turn
     val state1 = agent.run("First query", tools).toOption.get
@@ -263,10 +266,10 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "work in multi-turn conversations" in {
     val mockClient = new MockLLMClient("""{"response": "ok"}""")
-    val agent = new Agent(mockClient)
-    val tools = new ToolRegistry(Seq.empty)
+    val agent      = new Agent(mockClient)
+    val tools      = new ToolRegistry(Seq.empty)
 
-    val inputGuardrails = Seq(new LengthCheck(1, 100))
+    val inputGuardrails  = Seq(new LengthCheck(1, 100))
     val outputGuardrails = Seq(new JSONValidator())
 
     val result = for {
@@ -296,8 +299,8 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
 
   "Guardrails" should "not interfere with normal operation when empty" in {
     val mockClient = new MockLLMClient("Normal response")
-    val agent = new Agent(mockClient)
-    val tools = new ToolRegistry(Seq.empty)
+    val agent      = new Agent(mockClient)
+    val tools      = new ToolRegistry(Seq.empty)
 
     // Run without guardrails
     val result1 = agent.run("Query", tools)

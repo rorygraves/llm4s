@@ -37,16 +37,18 @@ class CompositeGuardrail[A](
    */
   private def validateAll(value: A): Result[A] = {
     val results = guardrails.map(_.validate(value))
-    val errors = results.collect { case Left(err) => err }
+    val errors  = results.collect { case Left(err) => err }
 
     if (errors.isEmpty) {
       Right(value)
     } else {
       // Aggregate all errors
-      Left(ValidationError.invalid(
-        "composite",
-        s"Multiple validation failures: ${errors.map(_.formatted).mkString("; ")}"
-      ))
+      Left(
+        ValidationError.invalid(
+          "composite",
+          s"Multiple validation failures: ${errors.map(_.formatted).mkString("; ")}"
+        )
+      )
     }
   }
 
@@ -55,17 +57,19 @@ class CompositeGuardrail[A](
    * Returns on first success.
    */
   private def validateAny(value: A): Result[A] = {
-    val results = guardrails.map(_.validate(value))
+    val results   = guardrails.map(_.validate(value))
     val successes = results.collect { case Right(v) => v }
 
     if (successes.nonEmpty) {
       Right(successes.head)
     } else {
       val errors = results.collect { case Left(err) => err }
-      Left(ValidationError.invalid(
-        "composite",
-        s"All validations failed: ${errors.map(_.formatted).mkString("; ")}"
-      ))
+      Left(
+        ValidationError.invalid(
+          "composite",
+          s"All validations failed: ${errors.map(_.formatted).mkString("; ")}"
+        )
+      )
     }
   }
 
@@ -73,12 +77,11 @@ class CompositeGuardrail[A](
    * Returns on first result (success or failure).
    * Useful for expensive guardrails where order matters.
    */
-  private def validateFirst(value: A): Result[A] = {
+  private def validateFirst(value: A): Result[A] =
     guardrails.headOption match {
       case Some(guardrail) => guardrail.validate(value)
-      case None => Right(value)
+      case None            => Right(value)
     }
-  }
 
   val name: String = s"CompositeGuardrail(${guardrails.map(_.name).mkString(", ")})"
 
@@ -88,6 +91,7 @@ class CompositeGuardrail[A](
 }
 
 object CompositeGuardrail {
+
   /**
    * Create a composite guardrail that validates all guardrails.
    * All must pass for validation to succeed.
@@ -108,9 +112,7 @@ object CompositeGuardrail {
    */
   def sequential[A](guardrails: Seq[Guardrail[A]]): Guardrail[A] = new Guardrail[A] {
     def validate(value: A): Result[A] =
-      guardrails.foldLeft[Result[A]](Right(value)) { (acc, guardrail) =>
-        acc.flatMap(guardrail.validate)
-      }
+      guardrails.foldLeft[Result[A]](Right(value))((acc, guardrail) => acc.flatMap(guardrail.validate))
 
     val name: String = s"SequentialGuardrail(${guardrails.map(_.name).mkString(" -> ")})"
 

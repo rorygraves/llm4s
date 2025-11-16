@@ -1,6 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
-import org.llm4s.agent.guardrails.{InputGuardrail, OutputGuardrail}
+import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
@@ -19,15 +19,19 @@ class LengthCheck(min: Int, max: Int) extends InputGuardrail with OutputGuardrai
 
   def validate(value: String): Result[String] =
     if (value.length < min) {
-      Left(ValidationError.invalid(
-        "input",
-        s"Input too short: ${value.length} characters (minimum: $min)"
-      ))
+      Left(
+        ValidationError.invalid(
+          "input",
+          s"Input too short: ${value.length} characters (minimum: $min)"
+        )
+      )
     } else if (value.length > max) {
-      Left(ValidationError.invalid(
-        "input",
-        s"Input too long: ${value.length} characters (maximum: $max)"
-      ))
+      Left(
+        ValidationError.invalid(
+          "input",
+          s"Input too long: ${value.length} characters (maximum: $max)"
+        )
+      )
     } else {
       Right(value)
     }
@@ -43,6 +47,7 @@ class LengthCheck(min: Int, max: Int) extends InputGuardrail with OutputGuardrai
 }
 
 object LengthCheck {
+
   /**
    * Create a length check with minimum and maximum bounds.
    */

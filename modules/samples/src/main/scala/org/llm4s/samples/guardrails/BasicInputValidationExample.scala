@@ -38,9 +38,7 @@ object BasicInputValidationExample extends App {
     case Right(state) =>
       println("✓ Input validation passed!")
       println(s"\nAgent response:")
-      state.conversation.messages.last.content.split("\n").foreach(line =>
-        println(s"  $line")
-      )
+      state.conversation.messages.last.content.split("\n").foreach(line => println(s"  $line"))
 
     case Left(error) =>
       println(s"✗ Validation or execution failed:")
