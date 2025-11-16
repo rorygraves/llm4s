@@ -782,6 +782,152 @@ for {
 - **Context pruning**: `samples/runMain org.llm4s.samples.agent.LongConversationExample`
 - **Persistence**: `samples/runMain org.llm4s.samples.agent.ConversationPersistenceExample`
 
+### Using Guardrails for Input/Output Validation
+
+**Guardrails framework** was added in Phase 1.2 to provide declarative, composable validation for agent inputs and outputs.
+
+#### What are Guardrails?
+
+Guardrails are pure functions that validate data before processing (input guardrails) or before returning (output guardrails). They help ensure:
+- **Safety**: Filter inappropriate content, profanity, etc.
+- **Quality**: Validate format, length, tone, etc.
+- **Correctness**: Ensure output matches expected schema (e.g., JSON)
+
+#### Basic Usage
+
+```scala
+import org.llm4s.agent.Agent
+import org.llm4s.agent.guardrails.builtin._
+import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.toolapi.ToolRegistry
+
+val result = for {
+  client <- LLMConnect.fromEnv()
+  agent = new Agent(client)
+  tools = ToolRegistry.empty
+
+  // Define guardrails
+  inputGuardrails = Seq(
+    new LengthCheck(min = 1, max = 10000),
+    new ProfanityFilter()
+  )
+
+  outputGuardrails = Seq(
+    new JSONValidator()
+  )
+
+  // Run with guardrails
+  state <- agent.run(
+    query = "Generate a JSON response",
+    tools = tools,
+    inputGuardrails = inputGuardrails,
+    outputGuardrails = outputGuardrails
+  )
+} yield state
+```
+
+#### Built-in Guardrails
+
+| Guardrail | Type | Description |
+|-----------|------|-------------|
+| `LengthCheck(min, max)` | Input/Output | Validates string length bounds |
+| `ProfanityFilter()` | Input/Output | Filters inappropriate content |
+| `JSONValidator()` | Output | Validates JSON format |
+| `RegexValidator(pattern)` | Input/Output | Validates regex match |
+| `ToneValidator(tones)` | Output | Validates response tone |
+
+#### Custom Guardrails
+
+Create custom guardrails by implementing `InputGuardrail` or `OutputGuardrail`:
+
+```scala
+import org.llm4s.agent.guardrails.InputGuardrail
+import org.llm4s.error.ValidationError
+import org.llm4s.types.Result
+
+class KeywordRequirement(keywords: Set[String]) extends InputGuardrail {
+  def validate(value: String): Result[String] = {
+    val missing = keywords.filterNot(value.toLowerCase.contains)
+    if (missing.isEmpty) {
+      Right(value)
+    } else {
+      Left(ValidationError.invalid(
+        "input",
+        s"Missing required keywords: ${missing.mkString(", ")}"
+      ))
+    }
+  }
+
+  val name = "KeywordRequirement"
+  override val description = Some(s"Requires: ${keywords.mkString(", ")}")
+}
+```
+
+#### Composing Guardrails
+
+Combine multiple guardrails with different strategies:
+
+```scala
+import org.llm4s.agent.guardrails.CompositeGuardrail
+
+// All must pass (AND logic)
+val safetyChecks = CompositeGuardrail.all(Seq(
+  new LengthCheck(1, 10000),
+  new ProfanityFilter()
+))
+
+// At least one must pass (OR logic)
+val languageDetection = CompositeGuardrail.any(Seq(
+  new RegexValidator(".*\\b(scala)\\b.*".r),
+  new RegexValidator(".*\\b(java)\\b.*".r)
+))
+
+// Sequential with short-circuit
+val sequential = CompositeGuardrail.sequential(Seq(
+  new LengthCheck(1, 10000),  // Check first (cheap)
+  new ProfanityFilter()        // Only if length passes
+))
+```
+
+#### Multi-Turn with Guardrails
+
+Apply guardrails consistently across conversation turns:
+
+```scala
+val inputGuardrails = Seq(
+  new LengthCheck(1, 5000),
+  new ProfanityFilter()
+)
+
+val outputGuardrails = Seq(
+  new ToneValidator(Set(Tone.Professional, Tone.Friendly))
+)
+
+val result = for {
+  state1 <- agent.run(
+    "First query",
+    tools,
+    inputGuardrails = inputGuardrails,
+    outputGuardrails = outputGuardrails
+  )
+
+  state2 <- agent.continueConversation(
+    state1,
+    "Second query",
+    inputGuardrails = inputGuardrails,
+    outputGuardrails = outputGuardrails
+  )
+} yield state2
+```
+
+#### Examples
+
+- **Basic input validation**: `samples/runMain org.llm4s.samples.guardrails.BasicInputValidationExample`
+- **JSON output**: `samples/runMain org.llm4s.samples.guardrails.JSONOutputValidationExample`
+- **Custom guardrail**: `samples/runMain org.llm4s.samples.guardrails.CustomGuardrailExample`
+- **Multi-turn with tone**: `samples/runMain org.llm4s.samples.guardrails.MultiTurnToneValidationExample`
+- **Composite guardrails**: `samples/runMain org.llm4s.samples.guardrails.CompositeGuardrailExample`
+
 ### Adding a New Provider
 
 1. **Create** provider config in `llmconnect/config/`

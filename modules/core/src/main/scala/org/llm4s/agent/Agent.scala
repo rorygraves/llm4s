@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.guardrails.{CompositeGuardrail, InputGuardrail, OutputGuardrail}
 import org.llm4s.core.safety.Safety
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -411,6 +412,58 @@ class Agent(client: LLMClient) {
   }
 
   /**
+   * Validate input using guardrails.
+   *
+   * If no guardrails are provided, input passes through unchanged.
+   * If guardrails are provided, they are all evaluated and must all pass.
+   *
+   * @param query The input to validate
+   * @param guardrails The guardrails to apply
+   * @return Right(query) if valid, Left(error) if validation fails
+   */
+  private def validateInput(
+    query: String,
+    guardrails: Seq[InputGuardrail]
+  ): Result[String] = {
+    if (guardrails.isEmpty) {
+      Right(query)
+    } else {
+      // Run guardrails and aggregate results
+      val composite = CompositeGuardrail.all(guardrails)
+      composite.validate(query)
+    }
+  }
+
+  /**
+   * Validate output using guardrails.
+   *
+   * If no guardrails are provided, output passes through unchanged.
+   * If guardrails are provided, they are all evaluated and must all pass.
+   *
+   * @param state The agent state containing the output to validate
+   * @param guardrails The guardrails to apply
+   * @return Right(state) if valid, Left(error) if validation fails
+   */
+  private def validateOutput(
+    state: AgentState,
+    guardrails: Seq[OutputGuardrail]
+  ): Result[AgentState] = {
+    if (guardrails.isEmpty) {
+      Right(state)
+    } else {
+      // Extract final assistant message
+      val finalMessage = state.conversation.messages
+        .findLast(_.role == MessageRole.Assistant)
+        .map(_.content)
+        .getOrElse("")
+
+      // Validate final message
+      val composite = CompositeGuardrail.all(guardrails)
+      composite.validate(finalMessage).map(_ => state)
+    }
+  }
+
+  /**
    * Runs the agent from an existing state until completion, failure, or step limit is reached
    *
    * @param initialState The initial agent state to run from
@@ -523,6 +576,8 @@ class Agent(client: LLMClient) {
    *
    * @param query The user query to process
    * @param tools The registry of available tools
+   * @param inputGuardrails Validate query before processing (default: none)
+   * @param outputGuardrails Validate response before returning (default: none)
    * @param maxSteps Optional limit on the number of steps to execute
    * @param traceLogPath Optional path to write a markdown trace file
    * @param systemPromptAddition Optional additional text to append to the default system prompt
@@ -533,21 +588,34 @@ class Agent(client: LLMClient) {
   def run(
     query: String,
     tools: ToolRegistry,
+    inputGuardrails: Seq[InputGuardrail] = Seq.empty,
+    outputGuardrails: Seq[OutputGuardrail] = Seq.empty,
     maxSteps: Option[Int] = None,
     traceLogPath: Option[String] = None,
     systemPromptAddition: Option[String] = None,
     completionOptions: CompletionOptions = CompletionOptions(),
     debug: Boolean = false
   ): Result[AgentState] = {
-    if (debug) {
-      logger.info("[DEBUG] ========================================")
-      logger.info("[DEBUG] Initializing new agent with query")
-      logger.info("[DEBUG] Query: {}", query)
-      logger.info("[DEBUG] Tools: {}", tools.tools.map(_.name).mkString(", "))
-      logger.info("[DEBUG] ========================================")
-    }
-    val initialState = initialize(query, tools, systemPromptAddition, completionOptions)
-    run(initialState, maxSteps, traceLogPath, debug)
+    for {
+      // 1. Validate input
+      validatedQuery <- validateInput(query, inputGuardrails)
+
+      // 2. Initialize and run agent
+      _ = if (debug) {
+        logger.info("[DEBUG] ========================================")
+        logger.info("[DEBUG] Initializing new agent with query")
+        logger.info("[DEBUG] Query: {}", validatedQuery)
+        logger.info("[DEBUG] Tools: {}", tools.tools.map(_.name).mkString(", "))
+        logger.info("[DEBUG] Input guardrails: {}", inputGuardrails.map(_.name).mkString(", "))
+        logger.info("[DEBUG] Output guardrails: {}", outputGuardrails.map(_.name).mkString(", "))
+        logger.info("[DEBUG] ========================================")
+      }
+      initialState = initialize(validatedQuery, tools, systemPromptAddition, completionOptions)
+      finalState <- run(initialState, maxSteps, traceLogPath, debug)
+
+      // 3. Validate output
+      validatedState <- validateOutput(finalState, outputGuardrails)
+    } yield validatedState
   }
 
   /**
@@ -559,6 +627,8 @@ class Agent(client: LLMClient) {
    *
    * @param previousState The previous agent state (must be Complete or Failed)
    * @param newUserMessage The new user message to process
+   * @param inputGuardrails Validate new message before processing
+   * @param outputGuardrails Validate response before returning
    * @param maxSteps Optional limit on reasoning steps for this turn
    * @param traceLogPath Optional path for trace logging
    * @param contextWindowConfig Optional configuration for automatic context pruning
@@ -580,6 +650,8 @@ class Agent(client: LLMClient) {
   def continueConversation(
     previousState: AgentState,
     newUserMessage: String,
+    inputGuardrails: Seq[InputGuardrail] = Seq.empty,
+    outputGuardrails: Seq[OutputGuardrail] = Seq.empty,
     maxSteps: Option[Int] = None,
     traceLogPath: Option[String] = None,
     contextWindowConfig: Option[ContextWindowConfig] = None,
@@ -587,37 +659,45 @@ class Agent(client: LLMClient) {
   ): Result[AgentState] = {
     import org.llm4s.error.ValidationError
 
-    // Validate previous state
-    previousState.status match {
-      case AgentStatus.Complete | AgentStatus.Failed(_) =>
-        // Prepare new state by adding user message and resetting status
-        val stateWithNewMessage = previousState.copy(
-          conversation = previousState.conversation.addMessage(UserMessage(newUserMessage)),
-          status = AgentStatus.InProgress,
-          logs = Seq.empty // Reset logs for new turn
-        )
+    for {
+      // 1. Validate input
+      validatedMessage <- validateInput(newUserMessage, inputGuardrails)
 
-        // Optionally prune before running
-        val stateToRun = contextWindowConfig match {
-          case Some(config) =>
-            AgentState.pruneConversation(stateWithNewMessage, config)
-          case None =>
-            stateWithNewMessage
-        }
-
-        // Run from the new state
-        run(stateToRun, maxSteps, traceLogPath, debug)
-
-      case AgentStatus.InProgress | AgentStatus.WaitingForTools =>
-        Left(
-          ValidationError.invalid(
-            "agentState",
-            "Cannot continue from an incomplete conversation. " +
-              "Previous state must be Complete or Failed. " +
-              s"Current status: ${previousState.status}"
+      // 2. Validate previous state and continue
+      finalState <- previousState.status match {
+        case AgentStatus.Complete | AgentStatus.Failed(_) =>
+          // Prepare new state by adding user message and resetting status
+          val stateWithNewMessage = previousState.copy(
+            conversation = previousState.conversation.addMessage(UserMessage(validatedMessage)),
+            status = AgentStatus.InProgress,
+            logs = Seq.empty // Reset logs for new turn
           )
-        )
-    }
+
+          // Optionally prune before running
+          val stateToRun = contextWindowConfig match {
+            case Some(config) =>
+              AgentState.pruneConversation(stateWithNewMessage, config)
+            case None =>
+              stateWithNewMessage
+          }
+
+          // Run from the new state
+          run(stateToRun, maxSteps, traceLogPath, debug)
+
+        case AgentStatus.InProgress | AgentStatus.WaitingForTools =>
+          Left(
+            ValidationError.invalid(
+              "agentState",
+              "Cannot continue from an incomplete conversation. " +
+                "Previous state must be Complete or Failed. " +
+                s"Current status: ${previousState.status}"
+            )
+          )
+      }
+
+      // 3. Validate output
+      validatedState <- validateOutput(finalState, outputGuardrails)
+    } yield validatedState
   }
 
   /**
@@ -659,19 +739,30 @@ class Agent(client: LLMClient) {
   ): Result[AgentState] = {
     // Run first turn
     val firstTurn = run(
-      initialQuery,
-      tools,
-      maxStepsPerTurn,
-      None,
-      systemPromptAddition,
-      completionOptions,
-      debug
+      query = initialQuery,
+      tools = tools,
+      inputGuardrails = Seq.empty,
+      outputGuardrails = Seq.empty,
+      maxSteps = maxStepsPerTurn,
+      traceLogPath = None,
+      systemPromptAddition = systemPromptAddition,
+      completionOptions = completionOptions,
+      debug = debug
     )
 
     // Fold over follow-up queries, threading state through
     followUpQueries.foldLeft(firstTurn) { (stateResult, query) =>
       stateResult.flatMap { state =>
-        continueConversation(state, query, maxStepsPerTurn, None, contextWindowConfig, debug)
+        continueConversation(
+          previousState = state,
+          newUserMessage = query,
+          inputGuardrails = Seq.empty,
+          outputGuardrails = Seq.empty,
+          maxSteps = maxStepsPerTurn,
+          traceLogPath = None,
+          contextWindowConfig = contextWindowConfig,
+          debug = debug
+        )
       }
     }
   }

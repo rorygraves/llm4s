@@ -56,7 +56,17 @@ class CodeWorker(sourceDirectory: String, imageName: String, hostPort: Int, clie
 
     // Run the agent to completion or until step limit is reached
     val agent  = new Agent(client)
-    val result = agent.run(task, toolRegistry, maxSteps, traceLogPath, None, debug = false)
+    val result = agent.run(
+      query = task,
+      tools = toolRegistry,
+      inputGuardrails = Seq.empty,
+      outputGuardrails = Seq.empty,
+      maxSteps = maxSteps,
+      traceLogPath = traceLogPath,
+      systemPromptAddition = None,
+      completionOptions = org.llm4s.llmconnect.model.CompletionOptions(),
+      debug = false
+    )
 
     result match {
       case Right(finalState) =>
