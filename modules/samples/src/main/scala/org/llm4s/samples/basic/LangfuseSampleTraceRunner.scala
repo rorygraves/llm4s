@@ -21,7 +21,7 @@ object LangfuseSampleTraceRunner {
     val fakeState = AgentState(
       conversation = conversation,
       tools = new ToolRegistry(Seq()),
-      userQuery = userMsg.content,
+      initialQuery = Some(userMsg.content),
       status = AgentStatus.Complete,
       logs = Seq(
         "[assistant] tools: 1 tool calls requested (search)",

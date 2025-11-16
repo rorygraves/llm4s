@@ -48,12 +48,9 @@ object MultiTurnConversationExample {
     )
   }
 
-  private def printLastAssistantMessage(state: org.llm4s.agent.AgentState): Unit = {
+  private def printLastAssistantMessage(state: org.llm4s.agent.AgentState): Unit =
     state.conversation.messages
       .filter(_.role == MessageRole.Assistant)
       .lastOption
-      .foreach { msg =>
-        println(s"Assistant: ${msg.content}")
-      }
-  }
+      .foreach(msg => println(s"Assistant: ${msg.content}"))
 }

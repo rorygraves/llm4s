@@ -19,9 +19,9 @@ object LongConversationExample {
 
     // Configure context window management
     val contextConfig = ContextWindowConfig(
-      maxMessages = Some(15), // Keep max 15 messages
-      preserveSystemMessage = true, // Always keep system message
-      minRecentTurns = 2, // Keep at least 2 recent turns
+      maxMessages = Some(15),                       // Keep max 15 messages
+      preserveSystemMessage = true,                 // Always keep system message
+      minRecentTurns = 2,                           // Keep at least 2 recent turns
       pruningStrategy = PruningStrategy.OldestFirst // Drop oldest messages first
     )
 

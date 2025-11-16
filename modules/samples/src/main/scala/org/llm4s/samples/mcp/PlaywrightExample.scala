@@ -145,7 +145,7 @@ object PlaywrightExample {
       val initialState = AgentState(
         conversation = Conversation(initialMessages),
         tools = registry,
-        userQuery = query
+        initialQuery = Some(query)
       )
 
       // Use the agent's runUntilCompletion method directly with our custom state

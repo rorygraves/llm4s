@@ -42,7 +42,7 @@ object ConversationPersistenceExample {
 
     // Part 2: Load the conversation and continue it
     val continueResult = for {
-      _ <- saveResult // Wait for save to complete
+      _      <- saveResult // Wait for save to complete
       client <- LLMConnect.fromEnv()
       tools = new ToolRegistry(Seq(WeatherTool.tool))
       agent = new Agent(client)

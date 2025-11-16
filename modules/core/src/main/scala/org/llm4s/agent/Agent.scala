@@ -610,7 +610,8 @@ class Agent(client: LLMClient) {
 
       case AgentStatus.InProgress | AgentStatus.WaitingForTools =>
         Left(
-          ValidationError(
+          ValidationError.invalid(
+            "agentState",
             "Cannot continue from an incomplete conversation. " +
               "Previous state must be Complete or Failed. " +
               s"Current status: ${previousState.status}"

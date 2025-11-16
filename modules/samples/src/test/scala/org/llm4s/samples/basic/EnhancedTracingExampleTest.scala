@@ -120,7 +120,7 @@ class EnhancedTracingExampleTest extends AnyFunSuite with Matchers {
         )
       ),
       tools = new org.llm4s.toolapi.ToolRegistry(Vector.empty),
-      userQuery = "Test query",
+      initialQuery = Some("Test query"),
       status = org.llm4s.agent.AgentStatus.InProgress,
       logs = Vector("Log entry 1", "Log entry 2")
     )

@@ -55,7 +55,7 @@ class PrintTracing extends Tracing {
     // Basic info
     printSubHeader("Agent Overview", BLUE)
     println(s"${BLUE}Status: ${state.status}$RESET")
-    println(s"${BLUE}User Query: ${state.userQuery}$RESET")
+    state.initialQuery.foreach(q => println(s"${BLUE}Initial Query: $q$RESET"))
     println(s"${BLUE}Total Messages: ${state.conversation.messages.length}$RESET")
     println(s"${BLUE}Available Tools: ${state.tools.tools.map(_.name).mkString(", ")}$RESET")
     println()

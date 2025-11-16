@@ -42,7 +42,7 @@ class LangfuseTracing(
     val seqOfMessages = state.conversation.messages
     // Trace-create event
     val modelName   = determineModelName(seqOfMessages)
-    val traceInput  = if (state.userQuery.nonEmpty) state.userQuery else "No user query"
+    val traceInput  = state.initialQuery.getOrElse("No user query")
     val traceOutput = seqOfMessages.lastOption.map(_.content).filter(_.nonEmpty).getOrElse("No output")
     val traceEvent = TraceEvent.createTraceEvent(
       traceId = traceId,

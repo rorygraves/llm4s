@@ -192,12 +192,12 @@ object AgentState {
     // Calculate how many messages to keep
     val targetCount = config.maxMessages match {
       case Some(max) => math.max(1, max - systemMsgs.length)
-      case None =>
+      case None      =>
         // Token-based: iteratively count from the end
-        val maxTokens = config.maxTokens.getOrElse(Int.MaxValue)
+        val maxTokens    = config.maxTokens.getOrElse(Int.MaxValue)
         val systemTokens = systemMsgs.map(tokenCounter).sum
-        var count = 0
-        var tokens = 0
+        var count        = 0
+        var tokens       = 0
         otherMsgs.reverse.takeWhile { msg =>
           val msgTokens = tokenCounter(msg)
           if (tokens + msgTokens + systemTokens <= maxTokens) {
@@ -226,9 +226,11 @@ object AgentState {
     config: ContextWindowConfig,
     tokenCounter: Message => Int
   ): Seq[Message] = {
+    // Note: tokenCounter is unused for MiddleOut strategy as it's purely message-count based
+    val _           = tokenCounter // Suppress unused warning
     val targetCount = config.maxMessages.getOrElse(messages.length / 2)
-    val keepStart = targetCount / 2
-    val keepEnd = targetCount - keepStart
+    val keepStart   = targetCount / 2
+    val keepEnd     = targetCount - keepStart
 
     val (systemMsgs, otherMsgs) = messages.partition(_.role == MessageRole.System)
 
@@ -275,17 +277,45 @@ object AgentState {
    * @param state The agent state to serialize
    * @return JSON representation
    */
-  def toJson(state: AgentState): ujson.Value = {
+  def toJson(state: AgentState): ujson.Value =
     ujson.Obj(
-      "conversation" -> writeJs(state.conversation),
-      "initialQuery" -> state.initialQuery.map(ujson.Str).getOrElse(ujson.Null),
-      "status" -> writeJs(state.status),
-      "logs" -> ujson.Arr(state.logs.map(ujson.Str): _*),
-      "systemMessage" -> state.systemMessage.map(msg => ujson.Str(msg.content)).getOrElse(ujson.Null),
-      "completionOptions" -> writeJs(state.completionOptions)
+      "conversation"      -> writeJs(state.conversation),
+      "initialQuery"      -> state.initialQuery.map(ujson.Str.apply).getOrElse(ujson.Null),
+      "status"            -> writeJs(state.status),
+      "logs"              -> ujson.Arr(state.logs.map(ujson.Str.apply): _*),
+      "systemMessage"     -> state.systemMessage.map(msg => ujson.Str(msg.content)).getOrElse(ujson.Null),
+      "completionOptions" -> serializeCompletionOptions(state.completionOptions)
       // Note: tools are NOT serialized
     )
-  }
+
+  /**
+   * Serialize CompletionOptions to JSON (excluding tools which contain function references).
+   */
+  private def serializeCompletionOptions(opts: CompletionOptions): ujson.Value =
+    ujson.Obj(
+      "temperature"      -> ujson.Num(opts.temperature),
+      "topP"             -> ujson.Num(opts.topP),
+      "maxTokens"        -> opts.maxTokens.map(ujson.Num(_)).getOrElse(ujson.Null),
+      "presencePenalty"  -> ujson.Num(opts.presencePenalty),
+      "frequencyPenalty" -> ujson.Num(opts.frequencyPenalty)
+      // Note: tools are NOT serialized (contain function references)
+    )
+
+  /**
+   * Deserialize CompletionOptions from JSON.
+   */
+  private def deserializeCompletionOptions(json: ujson.Value): CompletionOptions =
+    CompletionOptions(
+      temperature = json("temperature").num,
+      topP = json("topP").num,
+      maxTokens = json("maxTokens") match {
+        case ujson.Num(n) => Some(n.toInt)
+        case _            => None
+      },
+      presencePenalty = json("presencePenalty").num,
+      frequencyPenalty = json("frequencyPenalty").num
+      // tools will be empty - caller must provide tools separately
+    )
 
   /**
    * Deserialize agent state from JSON.
@@ -299,7 +329,7 @@ object AgentState {
   def fromJson(
     json: ujson.Value,
     tools: ToolRegistry
-  ): Result[AgentState] = {
+  ): Result[AgentState] =
     Try {
       AgentState(
         conversation = read[Conversation](json("conversation")),
@@ -314,10 +344,9 @@ object AgentState {
           case ujson.Str(content) => Some(SystemMessage(content))
           case _                  => None
         },
-        completionOptions = read[CompletionOptions](json("completionOptions"))
+        completionOptions = deserializeCompletionOptions(json("completionOptions"))
       )
     }.toResult
-  }
 
   /**
    * Save state to file (convenience method).
@@ -333,7 +362,7 @@ object AgentState {
     import java.nio.charset.StandardCharsets
 
     Try {
-      val json = toJson(state)
+      val json    = toJson(state)
       val jsonStr = write(json, indent = 2)
       Files.write(Paths.get(path), jsonStr.getBytes(StandardCharsets.UTF_8))
       ()
@@ -355,8 +384,8 @@ object AgentState {
 
     for {
       jsonStr <- Try(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8)).toResult
-      json <- Try(ujson.read(jsonStr)).toResult
-      state <- fromJson(json, tools)
+      json    <- Try(ujson.read(jsonStr)).toResult
+      state   <- fromJson(json, tools)
     } yield state
   }
 }

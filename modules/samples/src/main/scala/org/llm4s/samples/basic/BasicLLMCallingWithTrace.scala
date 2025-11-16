@@ -43,7 +43,7 @@ object BasicLLMCallingWithTrace {
             val agentState = AgentState(
               conversation = conversation.copy(messages = conversation.messages :+ completion.message),
               tools = new ToolRegistry(Seq()),
-              userQuery = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse(""),
+              initialQuery = conversation.messages.collectFirst { case UserMessage(content) => content },
               status = AgentStatus.Complete,
               logs = Seq(s"Model ID=${completion.id}")
             )

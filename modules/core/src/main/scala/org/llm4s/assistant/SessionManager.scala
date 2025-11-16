@@ -63,9 +63,9 @@ class SessionManager(sessionDir: DirectoryPath, agent: Agent) {
 
         ujson.Obj(
           "conversation" -> ujson.read(conversationJson),
-          "userQuery"    -> ujson.Str(agentState.userQuery),
+          "initialQuery" -> agentState.initialQuery.map(ujson.Str.apply).getOrElse(ujson.Null),
           "status"       -> ujson.read(statusJson),
-          "logs"         -> ujson.Arr.from(agentState.logs.map(ujson.Str(_))),
+          "logs"         -> ujson.Arr.from(agentState.logs.map(ujson.Str.apply(_))),
           "toolNames"    -> ujson.Arr.from(agentState.tools.tools.map(t => ujson.Str(t.name)))
         )
     }
@@ -147,14 +147,18 @@ class SessionManager(sessionDir: DirectoryPath, agent: Agent) {
         val agentObjMap = agentObj.obj
         logger.debug("Parsing conversation...")
         val conversation = read[Conversation](agentObjMap("conversation"))
-        logger.debug("Parsing userQuery...")
-        val userQuery = agentObjMap("userQuery").str
+        logger.debug("Parsing initialQuery...")
+        val initialQuery = agentObjMap.get("initialQuery") match {
+          case Some(ujson.Str(q)) => Some(q)
+          case Some(ujson.Null)   => None
+          case _                  => None
+        }
         logger.debug("Parsing status...")
         val status = read[AgentStatus](agentObjMap("status"))
         logger.debug("Parsing logs...")
         val logs = agentObjMap("logs").arr.map(_.str).toSeq
         logger.debug("Creating AgentState...")
-        Some(AgentState(conversation, tools, userQuery, status, logs))
+        Some(AgentState(conversation, tools, initialQuery, status, logs))
     }
 
     logger.debug("Creating SessionState...")
