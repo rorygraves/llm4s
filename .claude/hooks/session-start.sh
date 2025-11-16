@@ -8,6 +8,38 @@ fi
 
 echo "🔧 Setting up llm4s build environment..."
 
+# Function to install SBT via launcher JAR (most reliable method)
+install_sbt_launcher() {
+  echo "  Installing SBT via launcher JAR..."
+  local sbt_version="1.10.5"
+  local install_dir="$HOME/.local/bin"
+
+  mkdir -p "$install_dir"
+
+  # Download launcher JAR
+  if ! curl -fL "https://repo1.maven.org/maven2/org/scala-sbt/sbt-launch/${sbt_version}/sbt-launch-${sbt_version}.jar" \
+       -o "$install_dir/sbt-launch.jar"; then
+    echo "    Failed to download SBT launcher JAR"
+    return 1
+  fi
+
+  # Create wrapper script
+  cat > "$install_dir/sbt" << 'WRAPPER'
+#!/bin/bash
+java -Xms512M -Xmx1536M -Xss1M -jar "$HOME/.local/bin/sbt-launch.jar" "$@"
+WRAPPER
+
+  chmod +x "$install_dir/sbt"
+
+  export PATH="$install_dir:$PATH"
+
+  if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+    echo "export PATH=\"$install_dir:\$PATH\"" >> "$CLAUDE_ENV_FILE"
+  fi
+
+  return 0
+}
+
 # Function to install SBT
 install_sbt() {
   echo "📥 Installing SBT..."
@@ -25,6 +57,11 @@ install_sbt() {
     return 0
   fi
 
+  # Try launcher JAR method (most reliable)
+  if install_sbt_launcher; then
+    return 0
+  fi
+
   # Try installing via apt if available
   if command -v apt-get &> /dev/null && [ -w "/etc/apt/sources.list.d" ] 2>/dev/null; then
     echo "  Using apt to install SBT..."
@@ -35,8 +72,8 @@ install_sbt() {
     return 0
   fi
 
-  # Manual installation as fallback
-  echo "  Installing SBT manually..."
+  # Manual installation via Coursier as fallback
+  echo "  Installing SBT via Coursier manually..."
   mkdir -p ~/.local/share/coursier
   curl -fLo ~/.local/share/coursier/cs https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux || return 1
   chmod +x ~/.local/share/coursier/cs
