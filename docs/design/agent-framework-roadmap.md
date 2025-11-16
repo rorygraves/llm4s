@@ -1,8 +1,9 @@
-# Agent Framework Comparison: llm4s vs OpenAI Agents SDK
+# llm4s Agent Framework Roadmap
 
 > **Date:** 2025-11-16
-> **Purpose:** Comprehensive gap analysis comparing llm4s agent implementation with OpenAI Agents SDK
+> **Purpose:** Strategic roadmap for enhancing llm4s agent capabilities while maintaining functional programming principles
 > **Status:** Analysis Complete
+> **Context:** Informed by OpenAI Agents SDK comparison, focused on llm4s-specific improvements
 
 ---
 
@@ -190,7 +191,7 @@ state2.conversation.messageCount  // 2 ✓ As expected
 
 **Key Insight:** llm4s prioritizes **correctness and composability** over **convenience**. However, through careful API design, we achieve both - functional purity AND ergonomic developer experience.
 
-**Reference:** See [Phase 1.1: Functional Conversation Management](design/phase-1.1-functional-conversation-management.md) for detailed application of these principles to multi-turn conversations.
+**Reference:** See [Phase 1.1: Functional Conversation Management](phase-1.1-functional-conversation-management.md) for detailed application of these principles to multi-turn conversations.
 
 ---
 
@@ -346,7 +347,7 @@ val result = for {
 - ✅ **YES** explicit state flow via for-comprehensions
 - ✅ **YES** context window management as pure functions (returns new state)
 
-**Recommendation:** Implement functional conversation APIs (see [Phase 1.1 Design](design/phase-1.1-functional-conversation-management.md)).
+**Recommendation:** Implement functional conversation APIs (see [Phase 1.1 Design](phase-1.1-functional-conversation-management.md)).
 
 ---
 
@@ -618,7 +619,7 @@ object AgentState {
 - Migration from imperative to functional style
 - Examples showing composition with Cats Effect, ZIO
 
-**Reference:** See [Phase 1.1 Design Document](design/phase-1.1-functional-conversation-management.md)
+**Reference:** See [Phase 1.1 Design Document](phase-1.1-functional-conversation-management.md)
 
 ---
 
@@ -1341,7 +1342,7 @@ This positions llm4s as the **premier choice** for:
 - Teams building mission-critical agent systems
 - Organizations requiring compile-time safety guarantees
 
-**Final Note:** Feature gaps should be closed with solutions that align with llm4s philosophy. The [Phase 1.1 Design](design/phase-1.1-functional-conversation-management.md) demonstrates this approach - achieving OpenAI SDK ergonomics while maintaining functional purity.
+**Final Note:** Feature gaps should be closed with solutions that align with llm4s philosophy. The [Phase 1.1 Design](phase-1.1-functional-conversation-management.md) demonstrates this approach - achieving OpenAI SDK ergonomics while maintaining functional purity.
 
 ---
 
