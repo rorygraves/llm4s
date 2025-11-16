@@ -9,11 +9,12 @@
 ## Table of Contents
 
 1. [Executive Summary](#executive-summary)
-2. [Detailed Feature Comparison](#detailed-feature-comparison)
-3. [Gap Analysis](#gap-analysis)
-4. [Implementation Roadmap](#implementation-roadmap)
-5. [Priority Recommendations](#priority-recommendations)
-6. [Appendix: Architecture Notes](#appendix-architecture-notes)
+2. [llm4s Design Philosophy](#llm4s-design-philosophy)
+3. [Detailed Feature Comparison](#detailed-feature-comparison)
+4. [Gap Analysis](#gap-analysis)
+5. [Implementation Roadmap](#implementation-roadmap)
+6. [Priority Recommendations](#priority-recommendations)
+7. [Appendix: Architecture Notes](#appendix-architecture-notes)
 
 ---
 
@@ -56,6 +57,140 @@
 | **Built-in Tools** | 2/10 | 10/10 | **Large** |
 
 **Overall Assessment:** llm4s has a strong foundation but lacks several production-critical features that OpenAI Agents SDK provides out-of-the-box.
+
+---
+
+## llm4s Design Philosophy
+
+Before comparing features, it's essential to understand llm4s's core design principles. These principles guide all architectural decisions and differentiate llm4s from other agent frameworks.
+
+### 1. Prefer Functional and Immutable
+
+**Principle:** All data structures are immutable; all operations are pure functions that return new states.
+
+**Rationale:**
+- **Correctness** - Immutability eliminates entire classes of bugs (race conditions, unexpected mutations)
+- **Testability** - Pure functions are trivially testable with no setup/teardown
+- **Composability** - Pure functions compose naturally via for-comprehensions
+- **Reasoning** - Code behavior is locally understandable without tracking global state
+
+**Example:**
+```scala
+// ❌ BAD: Mutable session (OpenAI SDK style)
+session = Session()
+session.add_message("Hello")  // Mutates session
+result = runner.run(agent, session)  // More mutation
+
+// ✅ GOOD: Immutable state (llm4s style)
+val state1 = agent.initialize("Hello", tools)
+val state2 = agent.run(state1)  // Returns new state, state1 unchanged
+val state3 = agent.continueConversation(state2, "Next query")  // Pure
+```
+
+**Implication for Feature Design:**
+- Multi-turn conversations use **state threading**, not mutable sessions
+- Configuration is **passed explicitly**, not stored in mutable objects
+- All agent operations **return `Result[AgentState]`**, never mutate in place
+
+### 2. Framework Agnostic
+
+**Principle:** Minimize dependencies on heavyweight frameworks; remain composable with any functional effect system.
+
+**Rationale:**
+- **Flexibility** - Users can integrate with Cats Effect, ZIO, or plain Scala
+- **Simplicity** - Less coupling = easier to understand and maintain
+- **Long-term stability** - Don't tie users to framework version churn
+
+**Example:**
+```scala
+// llm4s doesn't require cats-effect, but works seamlessly with it
+import cats.effect.IO
+
+val program: IO[AgentState] = for {
+  client <- IO.fromEither(LLMConnect.fromEnv())
+  state1 <- IO.fromEither(agent.run("Query", tools))
+  state2 <- IO.fromEither(agent.continueConversation(state1, "Next"))
+} yield state2
+```
+
+**Implication for Feature Design:**
+- Use `scala.concurrent.Future` for async (universally compatible)
+- Provide `Result[A]` (simple Either) instead of custom effect types
+- Don't force users into a specific effect system (IO, Task, etc.)
+
+### 3. Simplicity Over Cleverness
+
+**Principle:** APIs should be literate, clear, and properly documented. Prefer explicit over implicit.
+
+**Rationale:**
+- **Discoverability** - New users can understand code by reading it
+- **Maintainability** - Clever code is hard to change; simple code is easy to evolve
+- **Debugging** - Explicit control flow makes debugging straightforward
+
+**Example:**
+```scala
+// ✅ GOOD: Explicit, clear intent
+val result = for {
+  state1 <- agent.run("First query", tools)
+  state2 <- agent.continueConversation(state1, "Second query")
+} yield state2
+
+// ❌ BAD: Too clever, hard to understand
+implicit class AgentOps(state: AgentState) {
+  def >>(query: String)(implicit agent: Agent): Result[AgentState] =
+    agent.continueConversation(state, query)
+}
+val result = state >> "Next query"  // What does >> mean?
+```
+
+**Implication for Feature Design:**
+- Descriptive method names (`continueConversation`, not `continue` or `+`)
+- Avoid operator overloading for domain operations
+- Comprehensive ScalaDoc on all public APIs
+- Examples in documentation showing common use cases
+
+### 4. Principle of Least Surprise
+
+**Principle:** Follow established conventions; behave as users would expect.
+
+**Rationale:**
+- **Learnability** - Users can leverage existing knowledge
+- **Trust** - Predictable behavior builds confidence
+- **Productivity** - Less time reading docs, more time building
+
+**Example:**
+```scala
+// ✅ Expected: Conversation grows with each message
+val state1 = agent.initialize("Hello", tools)
+state1.conversation.messageCount  // 1
+
+val state2 = state1.copy(
+  conversation = state1.conversation.addMessage(UserMessage("Hi again"))
+)
+state2.conversation.messageCount  // 2 ✓ As expected
+
+// ❌ Surprising: Mutating would violate immutability
+// state1.conversation.messages += UserMessage("...")  // Doesn't compile ✓
+```
+
+**Implication for Feature Design:**
+- Immutable collections behave as expected (returns new collection)
+- Method names follow Scala conventions (`map`, `flatMap`, `fold`, etc.)
+- Error handling via `Either` (standard Scala pattern)
+- No magic behavior or hidden side effects
+
+### Design Philosophy Summary
+
+| Principle | What It Means | How It Differs from OpenAI SDK |
+|-----------|---------------|-------------------------------|
+| **Functional & Immutable** | All data immutable, operations pure | OpenAI uses mutable `Session` objects |
+| **Framework Agnostic** | Works with any effect system | OpenAI is Python-specific, asyncio-based |
+| **Simplicity Over Cleverness** | Explicit, well-documented APIs | Both SDKs value simplicity |
+| **Least Surprise** | Follow Scala conventions | OpenAI follows Python conventions |
+
+**Key Insight:** llm4s prioritizes **correctness and composability** over **convenience**. However, through careful API design, we achieve both - functional purity AND ergonomic developer experience.
+
+**Reference:** See [Phase 1.1: Functional Conversation Management](design/phase-1.1-functional-conversation-management.md) for detailed application of these principles to multi-turn conversations.
 
 ---
 
@@ -165,32 +300,53 @@
 
 ### Critical Gaps (High Priority)
 
-#### 1. **Session Management** ⭐⭐⭐⭐⭐
-**Gap:** llm4s requires manual conversation threading across agent runs.
+#### 1. **Conversation Management** ⭐⭐⭐⭐⭐
+**Gap:** llm4s lacks ergonomic APIs for multi-turn conversations while maintaining functional purity.
 
 **Impact:**
-- Increases boilerplate code for multi-turn interactions
-- Error-prone state management
+- More verbose multi-turn conversation code
+- No continuation helper methods
 - No automatic context window management
+- Samples show imperative patterns (using `var`)
 
-**OpenAI Advantage:**
+**OpenAI Approach (Mutable Sessions):**
 ```python
-# OpenAI - automatic session
+# Mutable session object
 session = Session()
 result1 = runner.run(agent, "What's the weather?", session=session)
-result2 = runner.run(agent, "And tomorrow?", session=session)  # Context preserved
+result2 = runner.run(agent, "And tomorrow?", session=session)  # Mutates session
 ```
 
-**llm4s Current:**
+**llm4s Current (Verbose but Functional):**
 ```scala
-// Manual state threading
+// Manual state threading - verbose
 val state1 = agent.initialize(query1, tools)
 val result1 = agent.run(state1, ...)
-// Must manually preserve state for next turn
-val state2 = result1.map(s => s.copy(userQuery = query2))
+// Must manually construct continuation
+val state2 = result1.map(s => s.copy(
+  conversation = s.conversation.addMessage(UserMessage(query2)),
+  status = AgentStatus.InProgress
+))
+val result2 = state2.flatMap(agent.run(_, ...))
 ```
 
-**Recommendation:** Implement `Session` abstraction with automatic history management.
+**Proposed Solution (Functional & Ergonomic):**
+```scala
+// Functional state threading with helper methods
+val result = for {
+  state1 <- agent.run("What's the weather?", tools)
+  state2 <- agent.continueConversation(state1, "And tomorrow?")  // Pure function!
+} yield state2
+```
+
+**Design Philosophy Alignment:**
+- ❌ **NO** mutable `Session` objects (violates functional principle)
+- ✅ **YES** pure functions that return new states
+- ✅ **YES** helper methods for common patterns (`continueConversation`, `runMultiTurn`)
+- ✅ **YES** explicit state flow via for-comprehensions
+- ✅ **YES** context window management as pure functions (returns new state)
+
+**Recommendation:** Implement functional conversation APIs (see [Phase 1.1 Design](design/phase-1.1-functional-conversation-management.md)).
 
 ---
 
@@ -391,55 +547,78 @@ def approval_workflow(request):
 
 ### Phase 1: Core Usability (Q1 2026 - 3 months)
 
-**Goal:** Match OpenAI SDK's developer experience for common use cases.
+**Goal:** Improve developer experience for multi-turn conversations while maintaining functional purity.
 
-#### 1.1 Session Management ⭐⭐⭐⭐⭐
+**Design Philosophy Applied:**
+- All APIs remain pure functions (no mutable sessions)
+- Helper methods reduce boilerplate while maintaining explicit state flow
+- Framework agnostic - works with plain Scala, Cats Effect, ZIO, etc.
+- Simple, well-documented APIs following principle of least surprise
+
+#### 1.1 Functional Conversation APIs ⭐⭐⭐⭐⭐
 **Effort:** 2-3 weeks
 
 **Deliverables:**
 ```scala
 package org.llm4s.agent
 
-case class Session(
-  id: SessionId,
-  conversationHistory: Conversation,
-  metadata: Map[String, String] = Map.empty,
-  createdAt: Instant,
-  updatedAt: Instant
-)
+// Pure continuation API
+class Agent(client: LLMClient) {
+  /**
+   * Continue a conversation with a new user message.
+   * Pure function - returns new state, does not mutate.
+   */
+  def continueConversation(
+    previousState: AgentState,
+    newUserMessage: String,
+    maxSteps: Option[Int] = None,
+    contextWindowConfig: Option[ContextWindowConfig] = None
+  ): Result[AgentState]
 
-trait SessionStore {
-  def save(session: Session): Result[Unit]
-  def load(id: SessionId): Result[Option[Session]]
-  def delete(id: SessionId): Result[Unit]
+  /**
+   * Run multiple turns sequentially using functional fold.
+   * No mutable state required.
+   */
+  def runMultiTurn(
+    initialQuery: String,
+    followUpQueries: Seq[String],
+    tools: ToolRegistry,
+    maxStepsPerTurn: Option[Int] = None
+  ): Result[AgentState]
 }
 
-// Implementations
-class InMemorySessionStore extends SessionStore
-class RedisSessionStore(redis: RedisClient) extends SessionStore
-class FileSessionStore(path: Path) extends SessionStore
+// Context window management (pure functions)
+case class ContextWindowConfig(
+  maxTokens: Option[Int] = None,
+  maxMessages: Option[Int] = None,
+  preserveSystemMessage: Boolean = true,
+  pruningStrategy: PruningStrategy = PruningStrategy.OldestFirst
+)
 
-// Enhanced Agent API
-class Agent(client: LLMClient) {
-  def run(
-    query: String,
-    tools: ToolRegistry,
-    session: Option[Session] = None,  // NEW
-    sessionStore: Option[SessionStore] = None  // NEW
-  ): Result[(AgentState, Session)]
+object AgentState {
+  /**
+   * Prune conversation - returns new state, does not mutate.
+   */
+  def pruneConversation(
+    state: AgentState,
+    config: ContextWindowConfig
+  ): AgentState
 }
 ```
 
 **Testing:**
-- Multi-turn conversation preservation
-- Session serialization/deserialization
-- Concurrent session access
-- Session expiry and cleanup
+- Multi-turn conversation flows (all functional)
+- Context window pruning strategies
+- State serialization/deserialization
+- Integration with effect systems (IO, Task)
 
 **Documentation:**
-- Session management guide
-- SessionStore implementation tutorial
-- Migration guide from manual state threading
+- Functional conversation management guide
+- Context window management tutorial
+- Migration from imperative to functional style
+- Examples showing composition with Cats Effect, ZIO
+
+**Reference:** See [Phase 1.1 Design Document](design/phase-1.1-functional-conversation-management.md)
 
 ---
 
@@ -857,47 +1036,160 @@ object Session {
 
 ### Design Principles for Gap Closure
 
-1. **Preserve Type Safety**
-   - Don't sacrifice Scala's type system for feature parity
-   - Use phantom types for session state tracking
-   - Keep compile-time guarantees for agent composition
+All enhancements must adhere to llm4s core design philosophy:
 
-2. **Result-based Error Handling**
-   - Continue using `Result[A]` for all fallible operations
-   - Avoid exceptions in public APIs
-   - Provide conversion utilities for exception-heavy libraries
+#### 1. Functional and Immutable First
 
-3. **Functional Core, Imperative Shell**
-   - Keep agent core logic pure and testable
-   - Push effects (I/O, state mutations) to boundaries
-   - Use `cats.effect.IO` for complex effect management (optional)
+**Preserve Type Safety:**
+- Don't sacrifice Scala's type system for feature parity
+- Use compile-time type checking where OpenAI uses runtime validation
+- Keep compile-time guarantees for agent composition
 
-4. **Backward Compatibility**
-   - Add new features as optional parameters
-   - Provide migration guides for breaking changes
-   - Maintain cross-version Scala support
+**Result-based Error Handling:**
+- Continue using `Result[A]` for all fallible operations
+- Avoid exceptions in public APIs
+- Provide conversion utilities for exception-heavy libraries (`Try.toResult`)
 
-5. **Modularity**
-   - Keep core agent framework separate from built-in tools
-   - Make integrations (workflow engines, observability) pluggable
-   - Allow users to opt-out of features they don't need
+**Functional Core, Imperative Shell:**
+- Keep agent core logic pure and testable
+- Push effects (I/O, state mutations) to boundaries
+- All operations return new states, never mutate
+
+**Example:**
+```scala
+// ❌ Don't add mutable sessions
+class Session {
+  var messages: List[Message] = List.empty
+  def add(msg: Message): Unit = { messages = messages :+ msg }
+}
+
+// ✅ Do add pure functions
+def continueConversation(state: AgentState, msg: String): Result[AgentState] =
+  Right(state.copy(conversation = state.conversation.addMessage(UserMessage(msg))))
+```
+
+#### 2. Framework Agnostic
+
+**Minimal Dependencies:**
+- Use `scala.concurrent.Future` for async (universally compatible)
+- Don't require Cats Effect, ZIO, or any specific effect system
+- Provide integration examples for popular frameworks
+
+**Composability:**
+- Ensure all APIs work with plain Scala, Cats Effect IO, ZIO Task, etc.
+- Use `Result[A]` which naturally converts to any effect type
+- Avoid tying users to framework-specific abstractions
+
+**Example:**
+```scala
+// ✅ Framework agnostic - works with any effect system
+val result: Result[AgentState] = agent.run(query, tools)
+
+// Users can lift to their preferred effect system
+val io: IO[AgentState] = IO.fromEither(result)
+val task: Task[AgentState] = ZIO.fromEither(result)
+```
+
+#### 3. Simplicity Over Cleverness
+
+**Literate APIs:**
+- Descriptive method names (`continueConversation`, not `>>` or `+`)
+- Avoid operator overloading for domain operations
+- Comprehensive ScalaDoc on all public APIs
+- Examples in documentation showing common use cases
+
+**Explicit Over Implicit:**
+- Minimize use of implicit parameters
+- Explicit state flow (visible in code)
+- No magic behavior or hidden side effects
+
+**Example:**
+```scala
+// ❌ Too clever
+state1 >> "query" >> "followup"  // What does >> mean?
+
+// ✅ Clear and explicit
+for {
+  state1 <- agent.run("query", tools)
+  state2 <- agent.continueConversation(state1, "followup")
+} yield state2
+```
+
+#### 4. Principle of Least Surprise
+
+**Follow Conventions:**
+- Method names follow Scala conventions (`map`, `flatMap`, `fold`)
+- Error handling via `Either` (standard Scala pattern)
+- Immutable collections behave as expected (return new collections)
+
+**Predictable Behavior:**
+- No hidden mutations
+- No global state
+- Operations compose as expected
+
+**Backward Compatibility:**
+- Add new features as optional parameters
+- Provide migration guides for breaking changes
+- Maintain cross-version Scala support
+
+#### 5. Modularity
+
+**Separation of Concerns:**
+- Keep core agent framework separate from built-in tools
+- Make integrations (workflow engines, observability) pluggable
+- Allow users to opt-out of features they don't need
+
+**Pure Core, Effectful Edges:**
+- Core business logic is pure (easy to test, reason about)
+- I/O and effects pushed to module boundaries
+- Clear separation between pure and effectful code
 
 ### Architectural Patterns
 
-#### Session Management Architecture
+#### Functional Conversation Flow
+```
+┌────────────────────┐
+│  Initial Query     │
+└─────────┬──────────┘
+          │
+          ▼
+   agent.run(query, tools) ──────► Result[AgentState]
+          │                              │
+          │                              │ (immutable state1)
+          │                              │
+          ▼                              ▼
+   ┌──────────────────────────────────────────┐
+   │  User wants to continue conversation     │
+   └──────────────────┬───────────────────────┘
+                      │
+                      ▼
+   agent.continueConversation(state1, "next query")
+                      │
+                      ├─→ Validate state (must be Complete/Failed)
+                      ├─→ Add user message (pure function)
+                      ├─→ Optionally prune context (pure function)
+                      └─→ Run agent ──────► Result[AgentState]
+                                                   │
+                                                   │ (immutable state2)
+                                                   ▼
+                                          Continue as needed...
+
+Key: All arrows represent pure functions returning new immutable states
+```
+
+#### Conversation Persistence (Optional)
 ```
 ┌─────────────────┐
-│  Agent.run()    │
+│  AgentState     │
 └────────┬────────┘
          │
-         ├─→ SessionStore.load(sessionId)
-         │   ├─→ InMemorySessionStore
-         │   ├─→ RedisSessionStore
-         │   └─→ FileSessionStore
+         ├─→ AgentState.toJson(state) ──► ujson.Value (pure)
          │
-         ├─→ Agent execution loop
+         ├─→ AgentState.saveToFile(state, path) ──► Result[Unit] (I/O)
          │
-         └─→ SessionStore.save(session)
+         └─→ AgentState.loadFromFile(path, tools) ──► Result[AgentState] (I/O)
+
+Key: Pure serialization separated from I/O operations
 ```
 
 #### Guardrails Architecture
@@ -990,22 +1282,66 @@ modules/core/src/main/scala/org/llm4s/
 
 ## Conclusion
 
-llm4s has a **strong foundation** with excellent type safety and functional design. To reach feature parity with OpenAI Agents SDK, the focus should be on:
+llm4s has a **strong foundation** built on solid design principles. While OpenAI Agents SDK provides more features out-of-the-box, llm4s offers a **fundamentally different and more correct approach** grounded in functional programming.
 
-1. **Developer Experience** - Sessions and guardrails will dramatically improve usability
-2. **Production Readiness** - Workflow integration and durability for enterprise use
-3. **Tool Ecosystem** - Built-in tools reduce time-to-production
-4. **Real-time UX** - Streaming events for modern applications
+### Strategic Focus Areas
 
-The roadmap is aggressive but achievable over 12 months with 1-2 dedicated developers.
+To enhance llm4s while maintaining its design philosophy:
 
-**Unique Value Proposition:** After closing gaps, llm4s will be the **only type-safe, production-ready agent framework for the Scala ecosystem**, with unique strengths in:
-- Compile-time safety for multi-agent composition
-- Result-based error handling
-- Workspace isolation for tool execution
-- Cross-version Scala support
+1. **Functional Developer Experience** - Ergonomic APIs for multi-turn conversations without sacrificing purity
+2. **Production Readiness** - Workflow integration and durability (explored functionally)
+3. **Tool Ecosystem** - Built-in tools as pure, composable functions
+4. **Real-time UX** - Streaming events as functional streams (Iterators, FS2, etc.)
 
-This positions llm4s as the premier choice for enterprise Scala teams building agent-based applications.
+The roadmap is achievable over 12 months with 1-2 dedicated developers, **with one critical constraint:** all implementations must adhere to llm4s design philosophy.
+
+### Unique Value Proposition
+
+After closing gaps, llm4s will offer a **unique combination** not found in any other agent framework:
+
+**Functional Correctness:**
+- ✅ Pure functions and immutable data (no mutable sessions)
+- ✅ Explicit state flow via for-comprehensions
+- ✅ Referential transparency - code behaves as written
+- ✅ Composable with any effect system (Cats Effect, ZIO, plain Scala)
+
+**Type Safety:**
+- ✅ Compile-time safety for multi-agent composition
+- ✅ Type-safe DAG construction with `Edge[A, B]`
+- ✅ Result-based error handling (no hidden exceptions)
+
+**Production Features:**
+- ✅ Workspace isolation for secure tool execution
+- ✅ Cross-version Scala support (2.13 & 3.x)
+- ✅ MCP integration for standardized tool protocols
+
+**Developer Experience:**
+- ✅ Simple, literate APIs (principle of least surprise)
+- ✅ Framework agnostic - bring your own stack
+- ✅ Well-documented with comprehensive examples
+
+### Positioning
+
+llm4s is **not trying to be a Scala port of OpenAI SDK**. Instead, it's building the **correct agent framework** for functional programming:
+
+| Aspect | OpenAI SDK | llm4s |
+|--------|------------|-------|
+| **Philosophy** | Convenient, practical | Correct, composable |
+| **State Management** | Mutable objects | Immutable, explicit flow |
+| **Error Handling** | Exceptions | Result types |
+| **Effect System** | Python asyncio | Framework agnostic |
+| **Type Safety** | Runtime validation | Compile-time checking |
+| **Target Audience** | Python developers | Scala/FP developers |
+
+**The llm4s Way:** We don't compromise functional principles for convenience. Instead, we design APIs that are **both functionally pure AND ergonomic** - proving that correctness and usability are not mutually exclusive.
+
+This positions llm4s as the **premier choice** for:
+- Enterprise Scala teams valuing correctness and maintainability
+- Functional programming practitioners
+- Teams building mission-critical agent systems
+- Organizations requiring compile-time safety guarantees
+
+**Final Note:** Feature gaps should be closed with solutions that align with llm4s philosophy. The [Phase 1.1 Design](design/phase-1.1-functional-conversation-management.md) demonstrates this approach - achieving OpenAI SDK ergonomics while maintaining functional purity.
 
 ---
 
