@@ -61,6 +61,7 @@ class CodeWorker(sourceDirectory: String, imageName: String, hostPort: Int, clie
       tools = toolRegistry,
       inputGuardrails = Seq.empty,
       outputGuardrails = Seq.empty,
+      handoffs = Seq.empty,
       maxSteps = maxSteps,
       traceLogPath = traceLogPath,
       systemPromptAddition = None,

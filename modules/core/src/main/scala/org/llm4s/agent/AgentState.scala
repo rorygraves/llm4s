@@ -14,6 +14,7 @@ import upickle.default.{ ReadWriter => RW, readwriter }
  * @param logs Execution logs for this turn
  * @param systemMessage The system message (injected at API call time, not stored in conversation)
  * @param completionOptions LLM completion options (temperature, maxTokens, etc.)
+ * @param availableHandoffs Available handoffs for this agent (used for detecting handoff tool calls)
  */
 case class AgentState(
   conversation: Conversation,
@@ -22,7 +23,8 @@ case class AgentState(
   status: AgentStatus = AgentStatus.InProgress,
   logs: Seq[String] = Seq.empty,
   systemMessage: Option[SystemMessage] = None,
-  completionOptions: CompletionOptions = CompletionOptions()
+  completionOptions: CompletionOptions = CompletionOptions(),
+  availableHandoffs: Seq[Handoff] = Seq.empty
 ) {
 
   /**
@@ -396,18 +398,40 @@ object AgentState {
 sealed trait AgentStatus
 
 object AgentStatus {
-  case object InProgress           extends AgentStatus
-  case object WaitingForTools      extends AgentStatus // Waiting for tool execution
+  case object InProgress      extends AgentStatus
+  case object WaitingForTools extends AgentStatus // Waiting for tool execution
+
+  /**
+   * Agent has requested a handoff to another agent.
+   *
+   * This status indicates that the current agent has determined
+   * that the query should be handled by a specialist agent.
+   *
+   * @param handoff The handoff to execute
+   * @param handoffReason The reason provided by the LLM for the handoff
+   */
+  case class HandoffRequested(
+    handoff: Handoff,
+    handoffReason: Option[String] = None
+  ) extends AgentStatus
+
   case object Complete             extends AgentStatus
   case class Failed(error: String) extends AgentStatus
 
   // Custom serialization for AgentStatus since sealed trait derivation can be tricky
+  // Note: HandoffRequested cannot be fully serialized (contains Agent reference)
   implicit val rw: RW[AgentStatus] = readwriter[ujson.Value].bimap[AgentStatus](
     {
       case InProgress      => ujson.Str("InProgress")
       case WaitingForTools => ujson.Str("WaitingForTools")
-      case Complete        => ujson.Str("Complete")
-      case Failed(error)   => ujson.Obj("type" -> ujson.Str("Failed"), "error" -> ujson.Str(error))
+      case HandoffRequested(handoff, reason) =>
+        ujson.Obj(
+          "type"      -> ujson.Str("HandoffRequested"),
+          "handoffId" -> ujson.Str(handoff.handoffId),
+          "reason"    -> reason.map(ujson.Str.apply).getOrElse(ujson.Null)
+        )
+      case Complete      => ujson.Str("Complete")
+      case Failed(error) => ujson.Obj("type" -> ujson.Str("Failed"), "error" -> ujson.Str(error))
     },
     {
       case ujson.Str("InProgress")      => InProgress
@@ -415,6 +439,10 @@ object AgentStatus {
       case ujson.Str("Complete")        => Complete
       case obj: ujson.Obj =>
         obj.obj.get("type") match {
+          case Some(ujson.Str("HandoffRequested")) =>
+            // Note: Cannot fully deserialize handoff (contains Agent reference)
+            // This is primarily for trace logging
+            Failed("Cannot deserialize HandoffRequested status - contains Agent reference")
           case Some(ujson.Str("Failed")) =>
             Failed(obj.obj.get("error").map(_.str).getOrElse("Unknown error"))
           case _ => Failed("Unknown status format")

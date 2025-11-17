@@ -51,6 +51,7 @@ object MCPAgentExample {
             tools = mcpRegistry,
             inputGuardrails = Seq.empty,
             outputGuardrails = Seq.empty,
+            handoffs = Seq.empty,
             maxSteps = Some(5),
             traceLogPath = Some(".log/mcp-agent-example.md"),
             systemPromptAddition = None,

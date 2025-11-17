@@ -30,6 +30,7 @@ object MultiStepAgentExample {
         tools = toolRegistry,
         inputGuardrails = Seq.empty,
         outputGuardrails = Seq.empty,
+        handoffs = Seq.empty,
         maxSteps = Some(1),
         traceLogPath = Some(limitedTraceLogPath),
         systemPromptAddition = None,

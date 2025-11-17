@@ -920,13 +920,180 @@ val result = for {
 } yield state2
 ```
 
-#### Examples
+#### Guardrail Examples
 
 - **Basic input validation**: `samples/runMain org.llm4s.samples.guardrails.BasicInputValidationExample`
 - **JSON output**: `samples/runMain org.llm4s.samples.guardrails.JSONOutputValidationExample`
 - **Custom guardrail**: `samples/runMain org.llm4s.samples.guardrails.CustomGuardrailExample`
 - **Multi-turn with tone**: `samples/runMain org.llm4s.samples.guardrails.MultiTurnToneValidationExample`
 - **Composite guardrails**: `samples/runMain org.llm4s.samples.guardrails.CompositeGuardrailExample`
+
+### Agent Handoffs for Multi-Agent Workflows
+
+**Agent handoffs** were added in Phase 1.3 to simplify multi-agent delegation patterns. Handoffs allow an agent to delegate queries to specialist agents when it determines specialized knowledge is required.
+
+#### Why Handoffs?
+
+llm4s supports DAG-based multi-agent orchestration, which provides fine-grained control but can be **verbose for simple delegation**. Handoffs provide a simpler alternative for common patterns:
+
+**Use Handoffs For:**
+- ✅ Simple 2-3 agent delegation
+- ✅ LLM-driven routing decisions
+- ✅ Sequential agent chaining
+- ✅ Query classification and routing
+
+**Use DAGs For:**
+- ✅ Complex multi-agent workflows (4+ agents)
+- ✅ Parallel agent execution
+- ✅ Type-safe data transformations
+- ✅ Conditional branching
+
+#### Basic Handoff Pattern
+
+```scala
+import org.llm4s.agent.{ Agent, Handoff }
+import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.toolapi.ToolRegistry
+
+val result = for {
+  client <- LLMConnect()
+
+  // Create specialized agents
+  generalAgent = new Agent(client)
+  specialistAgent = new Agent(client)
+
+  // Run with handoff - agent decides when to delegate
+  finalState <- generalAgent.run(
+    query = "Explain quantum entanglement in detail",
+    tools = ToolRegistry.empty,
+    handoffs = Seq(
+      Handoff.to(specialistAgent, "Physics expertise required")
+    ),
+    systemPromptAddition = Some(
+      "Hand off advanced physics questions to the specialist."
+    )
+  )
+} yield finalState
+```
+
+The LLM decides whether to hand off based on the query complexity. If it determines specialized knowledge is needed, it invokes the handoff tool automatically.
+
+#### How Handoffs Work
+
+1. **Tool Generation:** Each handoff becomes a tool the LLM can invoke
+2. **LLM Decision:** The agent decides when to hand off based on query content
+3. **Context Transfer:** Conversation history is transferred (if configured)
+4. **Execution:** Target agent processes with its own tools/settings
+5. **Return:** Result from target agent is returned
+
+#### Triage Pattern
+
+Route queries to the appropriate specialist:
+
+```scala
+val triageAgent = new Agent(client)
+val supportAgent = new Agent(client)
+val salesAgent = new Agent(client)
+val refundAgent = new Agent(client)
+
+triageAgent.run(
+  query = "I want a refund for order #12345",
+  tools = ToolRegistry.empty,
+  handoffs = Seq(
+    Handoff.to(supportAgent, "General customer support questions"),
+    Handoff.to(salesAgent, "Sales and product inquiries"),
+    Handoff.to(refundAgent, "Refund and return requests")
+  ),
+  systemPromptAddition = Some(
+    """Analyze queries and hand off to the appropriate specialist.
+      |You MUST hand off - do not answer directly.""".stripMargin
+  )
+)
+```
+
+#### Context Preservation
+
+Control what gets transferred during handoffs:
+
+```scala
+// Transfer full conversation history (default)
+Handoff(
+  targetAgent = specialistAgent,
+  preserveContext = true          // Transfer all messages
+)
+
+// Transfer only last user message
+Handoff(
+  targetAgent = specialistAgent,
+  preserveContext = false         // Only last user message
+)
+
+// Also transfer system message
+Handoff(
+  targetAgent = specialistAgent,
+  transferSystemMessage = true    // Include system message
+)
+```
+
+**Default behavior:** Full context transfer, no system message transfer.
+
+#### Multi-Turn with Handoffs
+
+Handoffs work seamlessly with multi-turn conversations:
+
+```scala
+for {
+  client <- LLMConnect()
+  agent = new Agent(client)
+  specialist = new Agent(client)
+
+  // Turn 1: General conversation
+  state1 <- agent.run("Tell me about quantum computing", tools)
+
+  // Turn 2: May trigger handoff if query is advanced
+  state2 <- agent.continueConversation(
+    state1,
+    "Explain quantum entanglement in detail"
+    // handoffs are preserved from initial state
+  )
+} yield state2
+```
+
+**Note:** Handoffs configured in `initialize()` or `run()` are stored in `AgentState.availableHandoffs` and preserved across conversation turns.
+
+#### Handoff Examples
+
+- **Triage routing**: `samples/runMain org.llm4s.samples.handoff.SimpleTriageHandoffExample`
+- **Specialist delegation**: `samples/runMain org.llm4s.samples.handoff.MathSpecialistHandoffExample`
+- **Context preservation**: `samples/runMain org.llm4s.samples.handoff.ContextPreservationExample`
+
+#### Handoff vs DAG Comparison
+
+**Same workflow, different approaches:**
+
+```scala
+// Handoff Approach (simpler for sequential)
+agent1.run(
+  query,
+  tools,
+  handoffs = Seq(Handoff.to(agent2, "Needs processing"))
+)
+
+// DAG Approach (better for parallel/complex)
+val plan = DAGPlan(
+  nodes = Map("agent1" -> agent1, "agent2" -> agent2),
+  edges = Seq(Edge("agent1", "agent2", transform))
+)
+new PlanRunner().executePlan(plan, input)
+```
+
+**Key Differences:**
+- **Handoffs:** LLM decides when to delegate
+- **DAGs:** Explicit control flow
+- **Handoffs:** Sequential only
+- **DAGs:** Parallel execution supported
+
+See [docs/design/phase-1.3-handoff-mechanism.md](docs/design/phase-1.3-handoff-mechanism.md) for complete design details.
 
 ### Adding a New Provider
 

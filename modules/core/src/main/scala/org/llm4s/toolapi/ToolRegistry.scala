@@ -55,3 +55,11 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
   ): com.azure.ai.openai.models.ChatCompletionsOptions =
     AzureToolHelper.addToolsToOptions(this, chatOptions)
 }
+
+object ToolRegistry {
+
+  /**
+   * Creates an empty tool registry with no tools
+   */
+  def empty: ToolRegistry = new ToolRegistry(Seq.empty)
+}

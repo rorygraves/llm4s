@@ -228,7 +228,8 @@ object PlaywrightExample {
               Left(error)
           }
 
-        case (org.llm4s.agent.AgentStatus.Complete, _) | (org.llm4s.agent.AgentStatus.Failed(_), _) =>
+        case (org.llm4s.agent.AgentStatus.Complete, _) | (org.llm4s.agent.AgentStatus.Failed(_), _) |
+            (org.llm4s.agent.AgentStatus.HandoffRequested(_, _), _) =>
           Right(state)
       }
 

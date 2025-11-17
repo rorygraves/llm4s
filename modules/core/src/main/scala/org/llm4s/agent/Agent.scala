@@ -12,6 +12,17 @@ import scala.annotation.tailrec
 import scala.util.{ Failure, Success, Try }
 
 /**
+ * Result type for handoff tool invocations.
+ * This is defined at module level to work around Scala 2.13 upickle macro limitations (SI-7567).
+ */
+private[agent] case class HandoffResult(handoff_requested: Boolean, handoff_id: String, reason: String)
+
+private[agent] object HandoffResult {
+  import upickle.default._
+  implicit val handoffResultRW: ReadWriter[HandoffResult] = macroRW[HandoffResult]
+}
+
+/**
  * Basic Agent implementation.
  */
 class Agent(client: LLMClient) {
@@ -22,6 +33,7 @@ class Agent(client: LLMClient) {
    *
    * @param query The user query to process
    * @param tools The registry of available tools
+   * @param handoffs Available handoffs (default: none)
    * @param systemPromptAddition Optional additional text to append to the default system prompt
    * @param completionOptions Optional completion options for LLM calls (temperature, maxTokens, etc.)
    * @return A new AgentState initialized with the query and tools
@@ -29,6 +41,7 @@ class Agent(client: LLMClient) {
   def initialize(
     query: String,
     tools: ToolRegistry,
+    handoffs: Seq[Handoff] = Seq.empty,
     systemPromptAddition: Option[String] = None,
     completionOptions: CompletionOptions = CompletionOptions()
   ): AgentState = {
@@ -51,12 +64,17 @@ class Agent(client: LLMClient) {
       UserMessage(query)
     )
 
+    // Convert handoffs to tools and combine with regular tools
+    val handoffTools = createHandoffTools(handoffs)
+    val allTools     = new ToolRegistry(tools.tools ++ handoffTools)
+
     AgentState(
       conversation = Conversation(initialMessages),
-      tools = tools,
+      tools = allTools,
       initialQuery = Some(query),
       systemMessage = Some(systemMsg),
-      completionOptions = completionOptions
+      completionOptions = completionOptions,
+      availableHandoffs = handoffs
     )
   }
 
@@ -166,11 +184,28 @@ class Agent(client: LLMClient) {
               case Success(newState) =>
                 if (debug) {
                   logger.info("[DEBUG] Tool processing successful")
-                  logger.info("[DEBUG] Status: WaitingForTools -> InProgress")
-                } else {
-                  logger.debug("Tool processing successful - continuing")
                 }
-                Right(newState.withStatus(AgentStatus.InProgress))
+
+                // Check if a handoff was requested
+                detectHandoff(newState) match {
+                  case Some((handoff, reason)) =>
+                    if (debug) {
+                      logger.info("[DEBUG] Handoff detected: {}", handoff.handoffName)
+                      logger.info("[DEBUG] Status: WaitingForTools -> HandoffRequested")
+                    } else {
+                      logger.info("Handoff requested: {}", handoff.handoffName)
+                    }
+                    Right(newState.withStatus(AgentStatus.HandoffRequested(handoff, Some(reason))))
+
+                  case None =>
+                    if (debug) {
+                      logger.info("[DEBUG] Status: WaitingForTools -> InProgress")
+                    } else {
+                      logger.debug("Tool processing successful - continuing")
+                    }
+                    Right(newState.withStatus(AgentStatus.InProgress))
+                }
+
               case Failure(error) =>
                 logger.error("Tool processing failed: {}", error.getMessage)
                 if (debug) {
@@ -278,6 +313,161 @@ class Agent(client: LLMClient) {
 
     // Add the tool messages to the conversation
     state.addMessages(toolMessages)
+  }
+
+  /**
+   * Create tool functions for handoffs.
+   * Each handoff becomes a tool that the LLM can invoke.
+   */
+  private def createHandoffTools(handoffs: Seq[Handoff]): Seq[ToolFunction[_, _]] = {
+    import org.llm4s.toolapi.{ ToolBuilder, Schema }
+    import HandoffResult._ // Import implicit ReadWriter
+
+    handoffs.map { handoff =>
+      val toolName        = handoff.handoffId
+      val toolDescription = s"Hand off this query to a specialist agent. ${handoff.transferReason.getOrElse("")}"
+
+      // Create object schema with a reason parameter
+      val schema = Schema
+        .`object`[Map[String, Any]]("Handoff parameters")
+        .withRequiredField("reason", Schema.string("Reason for the handoff"))
+
+      // Create tool function that marks the handoff in the result
+      ToolBuilder[Map[String, Any], HandoffResult](
+        toolName,
+        toolDescription,
+        schema
+      ).withHandler { extractor =>
+        extractor.getString("reason").map { reason =>
+          HandoffResult(
+            handoff_requested = true,
+            handoff_id = handoff.handoffId,
+            reason = reason
+          )
+        }
+      }.build()
+    }
+  }
+
+  /**
+   * Detect if the completion contains a handoff tool call.
+   *
+   * @param state Current agent state (contains available handoffs)
+   * @return Optional handoff and reason if handoff was requested
+   */
+  private def detectHandoff(state: AgentState): Option[(Handoff, String)] = {
+    // Find the latest assistant message with tool calls
+    val latestAssistantMessage = state.conversation.messages.reverse
+      .collectFirst { case msg: AssistantMessage if msg.toolCalls.nonEmpty => msg }
+
+    latestAssistantMessage.flatMap { assistantMessage =>
+      // Find handoff tool calls
+      val handoffToolCalls = assistantMessage.toolCalls.filter(tc => tc.name.startsWith("handoff_to_agent_"))
+
+      handoffToolCalls.headOption.flatMap { toolCall =>
+        // Parse handoff reason from arguments
+        val reasonOpt = Try {
+          val args = ujson.read(toolCall.arguments)
+          args.obj.get("reason").map(_.str).getOrElse("No reason provided")
+        }.toOption
+
+        // Find matching handoff by ID
+        val handoffId  = toolCall.name
+        val handoffOpt = state.availableHandoffs.find(_.handoffId == handoffId)
+
+        handoffOpt.flatMap(handoff => reasonOpt.map(reason => (handoff, reason)))
+      }
+    }
+  }
+
+  /**
+   * Build the initial state for the handoff target agent.
+   *
+   * @param sourceState State from source agent
+   * @param handoff The handoff configuration
+   * @param reason Optional handoff reason
+   * @return Initial state for target agent
+   */
+  private def buildHandoffState(
+    sourceState: AgentState,
+    handoff: Handoff,
+    reason: Option[String]
+  ): AgentState = {
+    // Determine which messages to transfer
+    val transferredMessages = if (handoff.preserveContext) {
+      sourceState.conversation.messages
+    } else {
+      // Only transfer the last user message
+      sourceState.conversation.messages
+        .findLast(_.role == MessageRole.User)
+        .toVector
+    }
+
+    // Build conversation
+    val conversation = Conversation(transferredMessages)
+
+    // Determine system message
+    val systemMessage = if (handoff.transferSystemMessage) {
+      sourceState.systemMessage
+    } else {
+      None
+    }
+
+    // Build logs
+    val handoffLog = s"[handoff] Received handoff from agent" +
+      reason.map(r => s" (Reason: $r)").getOrElse("")
+
+    // Create target state with empty tools (will be set by target agent's run)
+    AgentState(
+      conversation = conversation,
+      tools = ToolRegistry.empty,
+      initialQuery = sourceState.initialQuery,
+      status = AgentStatus.InProgress,
+      logs = Vector(handoffLog),
+      systemMessage = systemMessage,
+      availableHandoffs = Seq.empty // Target agent starts with no handoffs
+    )
+  }
+
+  /**
+   * Execute a handoff to another agent.
+   *
+   * @param sourceState The state from the source agent
+   * @param handoff The handoff to execute
+   * @param reason Optional reason provided by the LLM
+   * @param maxSteps Maximum steps for target agent
+   * @param traceLogPath Optional trace log file
+   * @param debug Enable debug logging
+   * @return Result from target agent
+   */
+  private def executeHandoff(
+    sourceState: AgentState,
+    handoff: Handoff,
+    reason: Option[String],
+    maxSteps: Option[Int],
+    traceLogPath: Option[String],
+    debug: Boolean
+  ): Result[AgentState] = {
+    // Log handoff
+    val logEntry = s"[handoff] Executing handoff: ${handoff.handoffName}" +
+      reason.map(r => s" (Reason: $r)").getOrElse("")
+
+    if (debug) {
+      logger.info("[DEBUG] {}", logEntry)
+      logger.info("[DEBUG] preserveContext: {}", handoff.preserveContext)
+      logger.info("[DEBUG] transferSystemMessage: {}", handoff.transferSystemMessage)
+    }
+
+    // Build target state
+    val targetState = buildHandoffState(sourceState, handoff, reason)
+
+    if (debug) {
+      logger.info("[DEBUG] Target state conversation messages: {}", targetState.conversation.messages.length)
+      logger.info("[DEBUG] Target state system message: {}", targetState.systemMessage.isDefined)
+    }
+
+    // Run target agent from the prepared state
+    handoff.targetAgent.run(targetState, maxSteps, traceLogPath, debug)
   }
 
   /**
@@ -553,6 +743,19 @@ class Agent(client: LLMClient) {
               Left(error)
           }
 
+        case (AgentStatus.HandoffRequested(handoff, reason), _) =>
+          if (debug) {
+            logger.info("[DEBUG] ========================================")
+            logger.info("[DEBUG] Handoff requested - executing handoff")
+            logger.info("[DEBUG] Handoff: {}", handoff.handoffName)
+            logger.info("[DEBUG] ========================================")
+          }
+          // Write state before handoff if tracing is enabled
+          traceLogPath.foreach(path => writeTraceLog(state, path))
+
+          // Execute handoff
+          executeHandoff(state, handoff, reason, maxSteps, traceLogPath, debug)
+
         case (_, _) =>
           if (debug) {
             logger.info("[DEBUG] ========================================")
@@ -576,6 +779,7 @@ class Agent(client: LLMClient) {
    * @param tools The registry of available tools
    * @param inputGuardrails Validate query before processing (default: none)
    * @param outputGuardrails Validate response before returning (default: none)
+   * @param handoffs Available handoffs (default: none)
    * @param maxSteps Optional limit on the number of steps to execute
    * @param traceLogPath Optional path to write a markdown trace file
    * @param systemPromptAddition Optional additional text to append to the default system prompt
@@ -588,6 +792,7 @@ class Agent(client: LLMClient) {
     tools: ToolRegistry,
     inputGuardrails: Seq[InputGuardrail] = Seq.empty,
     outputGuardrails: Seq[OutputGuardrail] = Seq.empty,
+    handoffs: Seq[Handoff] = Seq.empty,
     maxSteps: Option[Int] = None,
     traceLogPath: Option[String] = None,
     systemPromptAddition: Option[String] = None,
@@ -606,9 +811,10 @@ class Agent(client: LLMClient) {
         logger.info("[DEBUG] Tools: {}", tools.tools.map(_.name).mkString(", "))
         logger.info("[DEBUG] Input guardrails: {}", inputGuardrails.map(_.name).mkString(", "))
         logger.info("[DEBUG] Output guardrails: {}", outputGuardrails.map(_.name).mkString(", "))
+        logger.info("[DEBUG] Handoffs: {}", handoffs.length)
         logger.info("[DEBUG] ========================================")
       }
-      initialState = initialize(validatedQuery, tools, systemPromptAddition, completionOptions)
+      initialState = initialize(validatedQuery, tools, handoffs, systemPromptAddition, completionOptions)
       finalState <- run(initialState, maxSteps, traceLogPath, debug)
 
       // 3. Validate output
@@ -681,7 +887,7 @@ class Agent(client: LLMClient) {
           // Run from the new state
           run(stateToRun, maxSteps, traceLogPath, debug)
 
-        case AgentStatus.InProgress | AgentStatus.WaitingForTools =>
+        case AgentStatus.InProgress | AgentStatus.WaitingForTools | AgentStatus.HandoffRequested(_, _) =>
           Left(
             ValidationError.invalid(
               "agentState",
@@ -740,6 +946,7 @@ class Agent(client: LLMClient) {
       tools = tools,
       inputGuardrails = Seq.empty,
       outputGuardrails = Seq.empty,
+      handoffs = Seq.empty,
       maxSteps = maxStepsPerTurn,
       traceLogPath = None,
       systemPromptAddition = systemPromptAddition,
