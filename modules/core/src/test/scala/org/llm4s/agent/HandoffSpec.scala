@@ -105,10 +105,11 @@ class HandoffSpec extends AnyFlatSpec with Matchers {
   it should "serialize without target agent reference" in {
     val targetAgent = new Agent(mockClient)
     val handoff     = Handoff(targetAgent, Some("Test handoff"))
-    val status      = AgentStatus.HandoffRequested(handoff, Some("Complex query"))
+    val status: AgentStatus = AgentStatus.HandoffRequested(handoff, Some("Complex query"))
 
     import upickle.default._
-    val json = write(status)
+    // Explicitly use AgentStatus type to find the implicit serializer
+    val json = write[AgentStatus](status)
 
     json should include("HandoffRequested")
     json should include("Complex query")
